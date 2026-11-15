@@ -47,7 +47,7 @@ jobs:
         id: check
         shell: bash
         run: |
-          count=$(ls -1 artifacts/*.widget.zip 2>/dev/null | wc -l)
+          count=$(find artifacts -name "*.widget.zip" 2>/dev/null | wc -l)
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
       - name: Upload build artifacts
