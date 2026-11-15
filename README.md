@@ -1,5 +1,9 @@
 # DeskFrame · 桌面美化框架
 
+![Build Host](https://github.com/lan0980/DeskFrame/actions/workflows/build-host.yml/badge.svg)
+![Pack Widgets](https://github.com/lan0980/DeskFrame/actions/workflows/pack-widgets.yml/badge.svg)
+![License](https://img.shields.io/github/license/lan0980/DeskFrame)
+
 一个只提供**底层逻辑框架与扩展机制**的 Windows 桌面美化宿主。本体不内置任何固定小部件，只负责小部件的**加载、渲染、布局、配置读取、启停、卸载与错误隔离**；桌面长什么样、怎么交互，全部由你自己编写的小部件决定。
 
 > **第一次使用？** 如果仓库文件已经上传但 Actions 没跑、Releases 是空的，先看 [UPLOAD-GUIDE.md](UPLOAD-GUIDE.md)（一页操作卡），完整说明见 [docs/START-HERE.md](docs/START-HERE.md)。

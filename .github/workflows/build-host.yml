@@ -1,0 +1,73 @@
+name: Build host (portable)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'host/**'
+      - 'package.json'
+      - '.github/workflows/build-host.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-host
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Remove stale nested folder
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ -d "deskframe" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git rm -r deskframe
+            git commit -m "chore: remove stale nested upload folder"
+            git push
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build portable host
+        run: npx electron-builder --win --dir
+
+      - name: Compress to zip
+        shell: pwsh
+        run: |
+          $src = "dist/win-unpacked"
+          if (-not (Test-Path $src)) {
+            $alt = Get-ChildItem dist -Directory | Select-Object -First 1
+            if ($alt) { $src = $alt.FullName }
+          }
+          Compress-Archive -Path "$src\*" -DestinationPath "DeskFrame-win-x64.zip" -Force
+
+      - name: Publish to latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: DeskFrame (Latest Build)
+          body: |
+            Automated portable build from commit ${{ github.sha }}
+
+            **Download** `DeskFrame-win-x64.zip`, extract to any folder, and run `DeskFrame.exe`.
+
+            > This is a rolling release — it always reflects the latest build of the `main` branch.
+          files: DeskFrame-win-x64.zip
+          prerelease: true
+          make_latest: false

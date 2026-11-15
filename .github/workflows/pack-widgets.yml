@@ -1,0 +1,71 @@
+name: Validate and pack widgets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'widgets/**'
+      - 'scripts/validate-widgets.js'
+      - '.github/workflows/pack-widgets.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pack-widgets
+  cancel-in-progress: true
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate widget manifests
+        run: node scripts/validate-widgets.js
+
+      - name: Pack widgets
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          for dir in widgets/*/; do
+            name=$(basename "$dir")
+            [ "$name" = "_template" ] && continue
+            [ -f "$dir/widget.json" ] || continue
+            (cd "$dir" && zip -r "../../artifacts/${name}.widget.zip" . -x "*.DS_Store")
+          done
+
+      - name: Check for widget packs
+        id: check
+        shell: bash
+        run: |
+          count=$(ls -1 artifacts/*.widget.zip 2>/dev/null | wc -l)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        if: steps.check.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: widget-packs
+          path: artifacts/*.widget.zip
+          if-no-files-found: ignore
+
+      - name: Publish to widgets-latest release
+        if: steps.check.outputs.count != '0'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: widgets-latest
+          name: DeskFrame Widget Packs
+          body: |
+            Automated widget packing from commit ${{ github.sha }}
+          files: artifacts/*.widget.zip
+          prerelease: true
+          make_latest: false
