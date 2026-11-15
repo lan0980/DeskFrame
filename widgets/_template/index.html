@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>我的小部件</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .card {
+    padding: 18px 26px; border-radius: 16px; color: #fff;
+    background: rgba(24, 28, 40, 0.55); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18); text-align: center;
+  }
+  #clock { font-size: 34px; font-weight: 300; letter-spacing: 2px; line-height: 1.2; }
+  #hint { margin-top: 6px; font-size: 11px; opacity: 0.65; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div id="clock">--:--:--</div>
+    <div id="hint">DeskFrame widget template</div>
+  </div>
+<script>
+  // window.deskframe is the ONLY host API. No Node, no fs, no require in here.
+  const host = window.deskframe;
+  let cfg = { format24h: true, accent: '#7c6cf0' };
+
+  function paint() {
+    const now = new Date();
+    const h = now.getHours();
+    const hh = cfg.format24h ? String(h).padStart(2, '0') : String(h % 12 || 12).padStart(2, '0');
+    document.getElementById('clock').textContent =
+      hh + ':' + String(now.getMinutes()).padStart(2, '0') + ':' + String(now.getSeconds()).padStart(2, '0');
+    document.getElementById('clock').style.color = cfg.accent;
+  }
+
+  // ready() must be called or the host treats the widget as failed and quarantines it.
+  host.ready()
+    .then(() => host.getConfig())
+    .then((c) => {
+      cfg = Object.assign(cfg, c || {});
+      paint();
+      setInterval(paint, 1000);
+      host.log('info', 'template widget started');
+    })
+    .catch((err) => { document.getElementById('clock').textContent = 'init failed'; });
+
+  // Configuration changes made in the manager window arrive here.
+  host.on('config', (next) => { cfg = Object.assign(cfg, next || {}); paint(); });
+  host.on('show', () => paint());
+</script>
+</body>
+</html>
