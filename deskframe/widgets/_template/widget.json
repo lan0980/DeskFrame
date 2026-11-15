@@ -1,0 +1,31 @@
+{
+  "protocol": 1,
+  "id": "my-widget",
+  "name": "我的小部件",
+  "version": "0.1.0",
+  "author": "your-name",
+  "description": "接口示例：一个透明桌面时钟，复制本文件夹并修改 id 即可开工。",
+  "entry": "index.html",
+  "permissions": ["config.read", "log"],
+  "window": {
+    "width": 300,
+    "height": 130,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": false
+  },
+  "configSchema": {
+    "format24h": {
+      "type": "boolean",
+      "default": true,
+      "label": "24 小时制"
+    },
+    "accent": {
+      "type": "color",
+      "default": "#7c6cf0",
+      "label": "强调色"
+    }
+  }
+}
