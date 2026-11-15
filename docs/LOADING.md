@@ -4,9 +4,11 @@
 
 ## 1. 拿宿主
 
-打开仓库的 **Releases** 页面，下载 `DeskFrame-win-x64.zip`，用资源管理器右键「全部提取」解压到任意文件夹（例如 `D:\DeskFrame\`）。双击里面的 `DeskFrame.exe`。
+打开仓库的 **Releases** 页面，下载 `DeskFrame-win-x64.exe`，放到任意文件夹（例如 `D:\DeskFrame\`），双击即可运行。绿色单文件版：**不用解压、不用安装**。
 
 首次启动会自动打开「小部件管理」窗口，并在托盘留一个入口。**这是绿色版**：不写系统目录、不改注册表安装项、自带渲染引擎，不需要 .NET / Node / WebView2 / Python。
+
+> Portable exe 首次运行会自解压到系统临时目录（`%TEMP%`）再启动，之后复用同一份解压结果，属正常机制；你的配置和小部件数据始终只存在 `%AppData%\DeskFrame\`。
 
 > 未签名的 exe 可能触发 Windows SmartScreen 提示「Windows 已保护你的电脑」。这是正常的，点「更多信息 → 仍要运行」即可；项目 README 与许可文件里已附免责声明。
 

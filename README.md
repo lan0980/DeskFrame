@@ -12,7 +12,7 @@
 
 | | |
 |---|---|
-| 是 | 一个绿色版 Windows 桌面宿主 + 一套稳定、版本化的小部件接口 |
+| 是 | 一个**单个绿色 exe** 的 Windows 桌面宿主（下载双击即用，不安装不解压）+ 一套稳定、版本化的小部件接口 |
 | 是 | 一个可直接在 GitHub 网页里编写、由 Actions 云端打包发布的项目 |
 | 不是 | 不需要安装、不需要本地编译、不需要任何命令行操作 |
 | 不是 | 不内置成品小部件（`widgets/_template` 只是接口示例，不是功能模块） |
@@ -20,8 +20,8 @@
 
 ## 拿到成品后要做的三件事（全是图形操作）
 
-1. 从 **Releases** 下载 `DeskFrame-win-x64.zip`，用资源管理器右键解压
-2. 双击 `DeskFrame.exe`（自带渲染引擎，不需要 .NET / Node / WebView2 / Python）
+1. 从 **Releases** 下载 `DeskFrame-win-x64.exe`，放到任意文件夹（绿色单文件版，不用解压、不用安装）
+2. 双击运行（自带渲染引擎，不需要 .NET / Node / WebView2 / Python；首次启动会自解压到系统临时目录，属正常机制）
 3. 在管理界面点「安装 .widget.zip」选中你下载的小部件包；或把小部件文件夹直接放进 `%AppData%\DeskFrame\widgets\`，宿主会自动发现并加载
 
 详见 [docs/LOADING.md](docs/LOADING.md)。

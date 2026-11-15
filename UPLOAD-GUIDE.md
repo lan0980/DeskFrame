@@ -1,6 +1,8 @@
 # 上传修正卡 · 先看这一页
 
-> 2026-11-16 实测结论：仓库里第一版文件**被放进了 `deskframe/` 子文件夹**，而且 `.github/`、`.devcontainer/`、`.gitignore` 这三个隐藏项没有上传成功。所以工作流一次都没跑过，Releases 现在是空的。代码本身没问题，只是位置不对。
+> ✅ **2026-11-16 更新：** 隐藏文件（`.github/workflows/`、`.devcontainer/`、`.gitignore`）已全部写入仓库，两个工作流均已跑通，`latest` Release 已有成品。以下内容保留，作为以后手动上传 / 重建仓库时的参考。
+
+> 历史问题：仓库里第一版文件**被放进了 `deskframe/` 子文件夹**，而且 `.github/`、`.devcontainer/`、`.gitignore` 这三个隐藏项没有上传成功，导致工作流一次都没跑过、Releases 为空。代码本身没问题，只是位置不对。
 
 ## 只需要一次「全选 + 拖拽 + 提交」
 
@@ -30,8 +32,8 @@
 
 | 位置 | 会出现什么 |
 |---|---|
-| Actions | `Build host (portable)` 和 `Validate and pack widgets` 两个工作流（首次约 5–10 分钟） |
-| Releases → `latest` | `DeskFrame-win-x64.zip`，解压双击 `DeskFrame.exe` 即可 |
+| Actions | `Build host (portable)` 和 `Validate and pack widgets` 两个工作流（首次约 2–10 分钟） |
+| Releases → `latest` | `DeskFrame-win-x64.exe`，双击即可运行（绿色单文件，不用解压不用安装） |
 | Releases → `widgets-latest` | 你自己写的小部件包 `<id>.widget.zip`（目前只有模板，暂时为空，正常） |
 
 `build-host.yml` 里还带了一步**云端自动清理**：第一次构建时会把旧的 `deskframe/` 嵌套目录自动删掉，仓库自己变干净，你不用手动删。
