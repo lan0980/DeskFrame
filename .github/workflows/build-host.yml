@@ -44,18 +44,20 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build portable host
-        run: npx electron-builder --win --dir
+      - name: Build portable exe
+        run: npx electron-builder --win
 
-      - name: Compress to zip
-        shell: pwsh
+      - name: Remove obsolete zip asset
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $src = "dist/win-unpacked"
-          if (-not (Test-Path $src)) {
-            $alt = Get-ChildItem dist -Directory | Select-Object -First 1
-            if ($alt) { $src = $alt.FullName }
-          }
-          Compress-Archive -Path "$src\*" -DestinationPath "DeskFrame-win-x64.zip" -Force
+          gh api "repos/${{ github.repository }}/releases/tags/latest" \
+            --jq '.assets[] | select(.name == "DeskFrame-win-x64.zip") | .id' 2>/dev/null \
+          | while read -r id; do
+              gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
+            done
 
       - name: Publish to latest release
         uses: softprops/action-gh-release@v2
@@ -65,9 +67,9 @@ jobs:
           body: |
             Automated portable build from commit ${{ github.sha }}
 
-            **Download** `DeskFrame-win-x64.zip`, extract to any folder, and run `DeskFrame.exe`.
+            **Download** `DeskFrame-win-x64.exe` and double-click to run. No install, no extraction needed.
 
-            > This is a rolling release — it always reflects the latest build of the `main` branch.
-          files: DeskFrame-win-x64.zip
+            > Rolling release — always reflects the latest build of the `main` branch.
+          files: dist/DeskFrame-win-x64.exe
           prerelease: true
           make_latest: false

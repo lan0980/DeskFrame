@@ -6,7 +6,7 @@
   "main": "host/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win --dir",
+    "dist": "electron-builder --win",
     "validate:widgets": "node scripts/validate-widgets.js"
   },
   "dependencies": {
@@ -29,8 +29,12 @@
     ],
     "win": {
       "target": [
-        "dir"
+        "portable"
       ]
+    },
+    "portable": {
+      "artifactName": "DeskFrame-win-x64.exe",
+      "requestExecutionLevel": "user"
     }
   },
   "repository": {
