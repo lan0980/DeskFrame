@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>天气</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .card {
+    box-sizing: border-box; width: calc(100% - 16px); max-height: calc(100% - 8px);
+    padding: 16px 22px; border-radius: 16px; color: #fff;
+    background: rgba(24, 28, 40, 0.55); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+    -webkit-app-region: drag;
+  }
+  button, input, textarea, select, a { -webkit-app-region: no-drag; }
+  #city { font-size: 12px; opacity: 0.75; letter-spacing: 1px; }
+  #temp { margin-top: 2px; font-size: 30px; font-weight: 300; line-height: 1.15; letter-spacing: 1px; }
+  #temp.msg { font-size: 15px; font-weight: 600; line-height: 1.3; letter-spacing: 0; }
+  #temp.bad { color: #ffb4a9; }
+  #meta { margin-top: 2px; font-size: 11.5px; opacity: 0.88; min-height: 15px; line-height: 1.35; }
+  .row { margin-top: 6px; display: flex; align-items: center; justify-content: space-between; }
+  #stamp { font-size: 10px; opacity: 0.55; }
+  button {
+    font-family: inherit; font-size: 11px; color: #fff; cursor: pointer;
+    background: rgba(255, 255, 255, 0.13); border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px; padding: 3px 10px;
+  }
+  button:hover { background: rgba(255, 255, 255, 0.24); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div id="city">重庆</div>
+    <div id="temp" class="msg">获取中…</div>
+    <div id="meta"></div>
+    <div class="row">
+      <span id="stamp"></span>
+      <button id="retry" type="button">重试</button>
+    </div>
+  </div>
+<script>
+  // 沙箱内唯一宿主 API 是 window.deskframe。联网请求受宿主门控：
+  // 只有小部件声明 network 权限、且用户在管理界面开启「允许小部件联网」时才放行，
+  // 否则宿主直接 cancel 请求，fetch 会抛错——本部件据此给出明确指引而不是崩溃或空白。
+  const host = window.deskframe;
+  const elCity = document.getElementById('city');
+  const elTemp = document.getElementById('temp');
+  const elMeta = document.getElementById('meta');
+  const elStamp = document.getElementById('stamp');
+  const elRetry = document.getElementById('retry');
+
+  let cfg = { latitude: 29.56, longitude: 106.55, city: '重庆', refreshMin: 30 };
+  let initialized = false;
+  let fetching = false;
+  let timer = null;
+
+  function logToHost(level, msg) {
+    try {
+      const p = host.log(level, msg);
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (_) { /* 记录失败不拖累界面 */ }
+  }
+
+  // open-meteo weather_code → 中文描述
+  function wxDesc(code) {
+    if (code === 0) return '晴';
+    if (code === 1 || code === 2) return '多云';
+    if (code === 3) return '阴';
+    if (code === 45 || code === 48) return '雾';
+    if (code >= 51 && code <= 55) return '毛毛雨';
+    if (code >= 61 && code <= 65) return '雨';
+    if (code >= 71 && code <= 75) return '雪';
+    if (code >= 80 && code <= 82) return '阵雨';
+    if (code >= 95 && code <= 99) return '雷雨';
+    return '未知（代码 ' + code + '）';
+  }
+
+  function fmtNow() {
+    const d = new Date();
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function setState(head, hint, bad) {
+    elTemp.textContent = head;
+    elTemp.classList.add('msg');
+    elTemp.classList.toggle('bad', !!bad);
+    elMeta.textContent = hint || '';
+    elStamp.textContent = ''; // 失败时清掉旧的更新时间，避免误导
+  }
+
+  function renderOk(temp, code, wind) {
+    elTemp.textContent = temp.toFixed(1) + '°C';
+    elTemp.classList.remove('msg', 'bad');
+    elMeta.textContent = wxDesc(code) + ' · 风速 ' + wind.toFixed(1) + ' km/h';
+    elStamp.textContent = '更新于 ' + fmtNow();
+  }
+
+  async function refresh() {
+    if (fetching) return;
+    const lat = Number(cfg.latitude);
+    const lon = Number(cfg.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      setState('配置无效：请填写正确的经纬度', '可在管理窗口修改后点「重试」', true);
+      logToHost('warn', 'weather: 经纬度配置无效');
+      return;
+    }
+    fetching = true;
+    setState('获取中…', '', false);
+    const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat +
+      '&longitude=' + lon + '&current=temperature_2m,weather_code,wind_speed_10m';
+    let res = null;
+    try {
+      res = await fetch(url);
+    } catch (err) {
+      // 情形①：请求被宿主在网络层取消（未开启联网）或本机断网——不伪造任何数据。
+      fetching = false;
+      setState('联网未开启', '在管理窗口勾选「允许小部件联网」后点重载', true);
+      logToHost('warn', 'weather: 网络请求被拦截或失败：' + ((err && err.message) || '未知原因'));
+      return;
+    }
+    if (!res.ok) {
+      // 情形②：请求成功但 HTTP 非 2xx。
+      fetching = false;
+      setState('接口返回异常（状态码 ' + res.status + '）', '稍后点「重试」再试', true);
+      logToHost('error', 'weather: open-meteo 返回 HTTP ' + res.status);
+      return;
+    }
+    let data = null;
+    try { data = await res.json(); } catch (_) { data = null; }
+    const cur = data && data.current;
+    const temp = cur ? Number(cur.temperature_2m) : NaN;
+    const code = cur ? Number(cur.weather_code) : NaN;
+    const wind = cur ? Number(cur.wind_speed_10m) : NaN;
+    if (!Number.isFinite(temp) || !Number.isFinite(code) || !Number.isFinite(wind)) {
+      // 情形③：JSON 解析失败或字段缺失。
+      fetching = false;
+      setState('数据格式无法识别', '接口返回结构可能已变化', true);
+      logToHost('error', 'weather: 响应 JSON 解析失败或字段缺失');
+      return;
+    }
+    fetching = false;
+    renderOk(temp, code, wind);
+  }
+
+  function applySchedule() {
+    if (timer) { clearInterval(timer); timer = null; }
+    const min = Math.max(1, Number(cfg.refreshMin) || 30);
+    timer = setInterval(refresh, min * 60000);
+  }
+
+  // 必须调用 ready()，否则宿主会在超时后把小部件隔离。
+  host.ready()
+    .then(() => host.getConfig())
+    .then((c) => {
+      cfg = Object.assign(cfg, c || {});
+      initialized = true;
+      elCity.textContent = String(cfg.city || '未命名城市');
+      applySchedule();
+      logToHost('info', 'weather: 小部件已启动');
+      return refresh(); // 首次加载即请求一次
+    })
+    .catch(() => {
+      setState('初始化失败', '请在管理窗口重载本小部件', true);
+      logToHost('error', 'weather: ready/getConfig 调用失败');
+    });
+
+  host.on('config', (next) => {
+    cfg = Object.assign(cfg, next || {});
+    elCity.textContent = String(cfg.city || '未命名城市');
+    if (!initialized) return;
+    applySchedule();
+    refresh(); // 经纬度/间隔可能变了，立即按新配置刷新
+  });
+  host.on('show', () => { if (initialized) refresh(); });
+
+  elRetry.addEventListener('click', () => { refresh(); });
+</script>
+</body>
+</html>

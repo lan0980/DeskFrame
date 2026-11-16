@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>剪贴板速览</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .card {
+    box-sizing: border-box; width: calc(100% - 16px);
+    padding: 16px 22px; border-radius: 16px; color: #fff;
+    background: rgba(24, 28, 40, 0.55); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+    -webkit-app-region: drag;
+  }
+  button, input, textarea, select, a { -webkit-app-region: no-drag; }
+  #title { font-size: 11.5px; opacity: 0.72; letter-spacing: 1px; }
+  #clip {
+    margin-top: 4px; font-size: 12.5px; line-height: 1.5; height: 38px;
+    overflow: hidden; word-break: break-all;
+  }
+  #clip.dim { opacity: 0.5; }
+  #status {
+    margin-top: 1px; font-size: 10.5px; opacity: 0.75;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #status.bad { opacity: 1; color: #ffb4a9; }
+  .row { margin-top: 6px; display: flex; gap: 8px; }
+  button {
+    font-family: inherit; font-size: 11.5px; color: #fff; cursor: pointer;
+    background: rgba(255, 255, 255, 0.13); border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px; padding: 3px 10px;
+  }
+  button:hover { background: rgba(255, 255, 255, 0.24); }
+  #last {
+    margin-top: 5px; font-size: 10px; opacity: 0.5;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* 内容变化时的高亮闪烁提示 */
+  .flash { animation: flashpulse 0.7s ease; }
+  @keyframes flashpulse {
+    0%  { box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18); }
+    35% { box-shadow: 0 0 0 2px rgba(124, 108, 240, 0.85), 0 8px 30px rgba(0, 0, 0, 0.28);
+          background: rgba(56, 52, 92, 0.78); }
+    100% { box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18); }
+  }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div id="title">剪贴板速览</div>
+    <div id="clip" class="dim">读取中…</div>
+    <div id="status">准备中…</div>
+    <div class="row">
+      <button id="copy" type="button">复制短语</button>
+      <button id="refresh" type="button">手动刷新</button>
+    </div>
+    <div id="last"></div>
+  </div>
+<script>
+  // 沙箱内唯一宿主 API 是 window.deskframe：没有 Node / require / fs，持久化只能用 localStorage。
+  const host = window.deskframe;
+  const card = document.getElementById('card');
+  const elClip = document.getElementById('clip');
+  const elStatus = document.getElementById('status');
+  const elLast = document.getElementById('last');
+
+  const LS_KEY = 'clipper.last';
+  const POLL_MS = 1200;
+
+  let cfg = { phrase: 'https://github.com', autoPoll: true, maxLen: 120 };
+  let lastText = null;      // null 表示尚未成功读取过剪贴板
+  let persistentError = '';
+  let statusTimer = null;
+  let pollTimer = null;
+  let initialized = false;
+
+  // 把宿主抛出的英文错误翻译成中文提示，界面不出现英文报错。
+  function zhErr(err) {
+    const m = (err && err.message) ? String(err.message) : '';
+    if (/permission denied/i.test(m)) {
+      if (/clipboard\.write/i.test(m)) return '小部件未声明剪贴板写入权限';
+      if (/clipboard\.read/i.test(m)) return '小部件未声明剪贴板读取权限';
+      return '缺少所需权限';
+    }
+    if (/exceeds/i.test(m)) return '内容超出大小限制';
+    return '未知错误';
+  }
+
+  // ---- localStorage：宿主给每个小部件独立持久会话分区，这是唯一可用的存储 ----
+  function readStore() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return null;
+      const rec = JSON.parse(raw);
+      return (rec && typeof rec.text === 'string') ? rec : null;
+    } catch (_) { return null; }
+  }
+  function writeStore(text) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ text: text, ts: Date.now() })); } catch (_) {}
+  }
+
+  function modeText() { return cfg.autoPoll ? '自动监听中 · 每 1.2 秒' : '已暂停自动监听'; }
+  function renderStatus() {
+    elStatus.classList.toggle('bad', !!persistentError);
+    elStatus.textContent = persistentError || modeText();
+  }
+  function showTransient(msg, bad) {
+    clearTimeout(statusTimer);
+    elStatus.textContent = msg;
+    elStatus.classList.toggle('bad', !!bad);
+    statusTimer = setTimeout(renderStatus, 2600);
+  }
+  function setPersistentError(msg) {
+    persistentError = msg;
+    clearTimeout(statusTimer);
+    renderStatus();
+  }
+
+  function maxChars() {
+    const n = Math.floor(Number(cfg.maxLen));
+    if (!Number.isFinite(n) || n <= 0) return 120;
+    return Math.min(1000, Math.max(10, n));
+  }
+  function renderClip() {
+    const t = String(lastText == null ? '' : lastText).replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t) {
+      elClip.textContent = '剪贴板为空';
+      elClip.classList.add('dim');
+      return;
+    }
+    elClip.classList.remove('dim');
+    const max = maxChars();
+    elClip.textContent = t.length > max ? t.slice(0, max) + '…' : t;
+  }
+  function fmtTime(ts) {
+    const d = new Date(Number(ts) || Date.now());
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function renderLastLine() {
+    const rec = readStore();
+    const t = rec ? rec.text.replace(/\s+/g, ' ').trim() : '';
+    if (!t) { elLast.textContent = '暂无历史记录'; return; }
+    elLast.textContent = '上次记录 ' + fmtTime(rec.ts) + '：' + (t.length > 22 ? t.slice(0, 22) + '…' : t);
+  }
+
+  function flash() {
+    card.classList.remove('flash');
+    void card.offsetWidth; // 强制重排，让动画可重复触发
+    card.classList.add('flash');
+  }
+
+  async function readOnce(isManual) {
+    if (!initialized) return;
+    let raw;
+    try {
+      raw = await host.clipboardRead();
+    } catch (err) {
+      elClip.textContent = '无法读取';
+      elClip.classList.add('dim');
+      setPersistentError('读取剪贴板失败：' + zhErr(err));
+      return;
+    }
+    const text = typeof raw === 'string' ? raw : '';
+    if (persistentError) { persistentError = ''; renderStatus(); }
+    const first = lastText === null;
+    if (text !== lastText) {
+      lastText = text;
+      renderClip();
+      if (!first) flash();            // 内容变化时高亮闪烁
+      if (text.trim()) { writeStore(text); renderLastLine(); }
+    } else if (isManual) {
+      renderClip();                   // 未变化也按最新 maxLen 重画
+      showTransient('内容未变化', false);
+    }
+  }
+
+  async function copyPhrase() {
+    const phrase = String(cfg.phrase == null ? '' : cfg.phrase);
+    if (!phrase) { setPersistentError('复制失败：快捷复制内容为空，请先在设置里填写'); return; }
+    try {
+      await host.clipboardWrite(phrase);
+    } catch (err) {
+      setPersistentError('复制失败：' + zhErr(err)); // 未声明权限时宿主会抛错，这里如实显示
+      return;
+    }
+    persistentError = '';
+    try {
+      const back = await host.clipboardRead();
+      if (String(back == null ? '' : back) === phrase) {
+        lastText = phrase;
+        renderClip();
+        flash();
+        writeStore(phrase);
+        renderLastLine();
+        showTransient('已复制', false);
+      } else {
+        showTransient('已写入，但回读内容不一致', true);
+      }
+    } catch (err) {
+      showTransient('已写入，但回读验证失败：' + zhErr(err), true);
+    }
+  }
+
+  function applyPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (cfg.autoPoll) pollTimer = setInterval(() => { readOnce(false); }, POLL_MS);
+  }
+
+  // 必须调用 ready()，否则宿主会在超时后把小部件隔离。
+  host.ready()
+    .then(() => host.getConfig())
+    .then((c) => {
+      cfg = Object.assign(cfg, c || {});
+      cfg.autoPoll = !!cfg.autoPoll;
+      initialized = true;
+      renderStatus();
+      renderLastLine();
+      applyPolling();
+      return readOnce(false);
+    })
+    .catch(() => {
+      elClip.textContent = '初始化失败';
+      elClip.classList.add('dim');
+      elStatus.textContent = '初始化失败，请在管理窗口重载本小部件';
+      elStatus.classList.add('bad');
+    });
+
+  host.on('config', (next) => {
+    cfg = Object.assign(cfg, next || {});
+    cfg.autoPoll = !!cfg.autoPoll;
+    if (!initialized) return;
+    if (lastText !== null) renderClip();
+    renderStatus();
+    applyPolling();
+  });
+  host.on('show', () => { readOnce(false); });
+
+  document.getElementById('copy').addEventListener('click', copyPhrase);
+  document.getElementById('refresh').addEventListener('click', () => { readOnce(true); });
+</script>
+</body>
+</html>
