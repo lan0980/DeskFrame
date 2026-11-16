@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>番茄钟</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .card {
+    box-sizing: border-box; width: 100%; height: 100%; position: relative;
+    padding: 16px 22px; border-radius: 16px; color: #fff;
+    background: rgba(24, 28, 40, .55); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .18);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px;
+    /* 无边框窗口只有声明了拖拽区域的部位才能被拖动 */
+    -webkit-app-region: drag;
+    user-select: none; cursor: default;
+  }
+  /* 所有可交互控件必须退出拖拽区，否则点不动 */
+  button, input, select, a, .nodrag { -webkit-app-region: no-drag; }
+
+  #phase { font-size: 12px; letter-spacing: 3px; opacity: .88; }
+  #time {
+    font-size: 40px; font-weight: 300; line-height: 1.12; letter-spacing: 1px;
+    font-variant-numeric: tabular-nums; color: var(--accent, #f97316);
+  }
+  .row { display: flex; gap: 8px; margin-top: 4px; }
+  button {
+    font-family: inherit; font-size: 12px; color: #fff; cursor: pointer;
+    padding: 4px 12px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .26);
+    background: rgba(255, 255, 255, .08);
+  }
+  button:hover:not(:disabled) { background: rgba(255, 255, 255, .18); }
+  button:disabled { opacity: .38; cursor: default; }
+
+  .foot {
+    position: absolute; left: 22px; right: 22px; bottom: 7px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; opacity: .66;
+  }
+  #bcast { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #err {
+    position: absolute; left: 22px; right: 22px; bottom: 7px; display: none;
+    font-size: 10px; line-height: 1.35; color: #fca5a5; text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div id="phase">空闲</div>
+    <div id="time">25:00</div>
+    <div class="row">
+      <button id="btnStart" type="button">开始</button>
+      <button id="btnPause" type="button">暂停</button>
+      <button id="btnReset" type="button">重置</button>
+    </div>
+    <div class="foot" id="foot">
+      <span id="cycles">已完成 0 轮</span>
+      <span id="bcast">尚未广播</span>
+    </div>
+    <div id="err"></div>
+  </div>
+<script>
+  // window.deskframe 是唯一的宿主 API：沙箱内没有 Node、没有 require、没有 fs。
+  // 本小部件是消息总线的「发送方」，每秒 emit('pomodoro', payload)。
+  const host = window.deskframe;
+  const CYCLES_KEY = 'pomodoro.cycles';
+  const $ = (id) => document.getElementById(id);
+
+  const dom = {
+    card: $('card'), phase: $('phase'), time: $('time'),
+    cycles: $('cycles'), bcast: $('bcast'), foot: $('foot'), err: $('err'),
+    start: $('btnStart'), pause: $('btnPause'), reset: $('btnReset')
+  };
+
+  const cfg = { focusMin: 25, breakMin: 5, autoStart: false, accent: '#f97316' };
+
+  const s = {
+    booted: false,        // host.ready() + getConfig() 成功
+    phase: 'idle',        // 'idle' | 'focus' | 'break'
+    running: false,
+    remaining: 25 * 60,   // 剩余秒数（整数）
+    cycles: 0,            // 已完成的专注轮数，localStorage 持久化
+    endAt: 0,             // 当前阶段的结束时间戳，避免 setInterval 漂移
+    timerId: null,
+    lastEmitSec: -1,      // 保证计时期间每秒只 emit 一次
+    delivered: null,      // 宿主返回的实际送达数量；null = 还没拿到结果
+    lastBadge: null,      // 上一次写进 setBadge 的文本，避免每秒刷宿主
+    errBus: '',
+    errBadge: '',
+    errStore: ''
+  };
+
+  /* ---------------- 工具 ---------------- */
+
+  function errText(err) {
+    if (!err) return '未知错误';
+    if (typeof err === 'string') return err;
+    return err.message || String(err);
+  }
+
+  function intOf(v, fallback) {
+    const n = Number(v);
+    return (typeof n === 'number' && isFinite(n)) ? Math.round(n) : fallback;
+  }
+
+  function minutes(v, fallback) {
+    const n = intOf(v, fallback);
+    return Math.min(600, Math.max(1, n));
+  }
+
+  function focusMinutes() { return minutes(cfg.focusMin, 25); }
+  function breakMinutes() { return minutes(cfg.breakMin, 5); }
+
+  function phaseSeconds(phase) {
+    return (phase === 'break' ? breakMinutes() : focusMinutes()) * 60;
+  }
+
+  // 秒 → MM:SS
+  function mmss(totalSeconds) {
+    let t = intOf(totalSeconds, 0);
+    if (t < 0) t = 0;
+    const m = Math.floor(t / 60);
+    const sec = t % 60;
+    return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  }
+
+  function phaseLabel(phase) {
+    if (phase === 'focus') return '专注中';
+    if (phase === 'break') return '休息中';
+    return '空闲';
+  }
+
+  /* ---------------- 持久化（只能用 localStorage） ---------------- */
+
+  function loadCycles() {
+    try {
+      const raw = localStorage.getItem(CYCLES_KEY);
+      if (raw === null || raw === '') return 0;
+      const v = JSON.parse(raw);
+      if (typeof v === 'number' && isFinite(v) && v >= 0) return Math.floor(v);
+      if (typeof v === 'object' && v && typeof v.cycles === 'number' && isFinite(v.cycles) && v.cycles >= 0) {
+        return Math.floor(v.cycles);
+      }
+      return 0;
+    } catch (e) {
+      s.errStore = '读取轮数记录失败：' + errText(e);
+      return 0;
+    }
+  }
+
+  function saveCycles() {
+    try {
+      localStorage.setItem(CYCLES_KEY, JSON.stringify(s.cycles));
+      s.errStore = '';
+    } catch (e) {
+      s.errStore = '保存轮数失败：' + errText(e);
+    }
+  }
+
+  /* ---------------- 渲染 ---------------- */
+
+  function errorText() {
+    const parts = [];
+    if (s.errBus) parts.push(s.errBus);
+    if (s.errBadge) parts.push(s.errBadge);
+    if (s.errStore) parts.push(s.errStore);
+    return parts.join(' · ');
+  }
+
+  function render() {
+    if (!s.booted) return;
+    dom.card.style.setProperty('--accent', cfg.accent || '#f97316');
+    dom.phase.textContent = phaseLabel(s.phase);
+    dom.time.textContent = mmss(s.remaining);
+    dom.time.style.color = cfg.accent || '#f97316';
+    dom.cycles.textContent = '已完成 ' + s.cycles + ' 轮' +
+      (s.phase !== 'idle' && !s.running ? ' · 已暂停' : (s.running ? ' · 进行中' : ''));
+
+    if (s.delivered === null) {
+      dom.bcast.textContent = '尚未广播';
+    } else if (s.delivered > 0) {
+      dom.bcast.textContent = '已广播给 ' + s.delivered + ' 个小部件';
+    } else {
+      dom.bcast.textContent = '暂无订阅者';
+    }
+
+    const e = errorText();
+    if (e) {
+      dom.foot.style.display = 'none';
+      dom.err.textContent = e;
+      dom.err.style.display = 'block';
+    } else {
+      dom.err.style.display = 'none';
+      dom.foot.style.display = 'flex';
+    }
+
+    dom.start.disabled = s.running;
+    dom.pause.disabled = !s.running;
+    dom.reset.disabled = !s.running && s.phase === 'idle';
+  }
+
+  /* ---------------- 消息总线：发送方 ---------------- */
+
+  // 契约：payload = { phase, remaining, cycles, focusMin }，名称固定 'pomodoro'
+  function buildPayload() {
+    return {
+      phase: s.phase,
+      remaining: Math.max(0, intOf(s.remaining, 0)),
+      cycles: Math.max(0, intOf(s.cycles, 0)),
+      focusMin: focusMinutes()
+    };
+  }
+
+  function broadcast() {
+    const payload = buildPayload();
+    let p;
+    try {
+      p = host.emit('pomodoro', payload);
+    } catch (e) {
+      // 未声明 bus 权限之类的错误会从这里冒出来，必须显示给用户
+      s.errBus = '广播失败（bus 权限？）：' + errText(e);
+      s.delivered = null;
+      render();
+      return;
+    }
+    if (!p || typeof p.then !== 'function') return;
+    p.then((res) => {
+      s.delivered = (res && typeof res.delivered === 'number') ? res.delivered : 0;
+      s.errBus = '';
+      render();
+    }).catch((e) => {
+      s.delivered = null;
+      s.errBus = '广播失败：' + errText(e);
+      render();
+    });
+  }
+
+  /* ---------------- 状态角标 ---------------- */
+
+  // 专注中显示 MM:SS（分钟变化才会变），休息中显示「休息」，空闲传空串清除，
+  // 暂停立刻显示「暂停」。文本没变化就不调宿主，避免每秒写盘刷屏。
+  function badgeText() {
+    if (s.phase === 'idle') return '';
+    if (!s.running) return '暂停';
+    if (s.phase === 'break') return '休息';
+    return mmss(s.remaining);
+  }
+
+  function syncBadge(force) {
+    const text = badgeText();
+    if (!force && text === s.lastBadge) return;
+    s.lastBadge = text;
+    let p;
+    try {
+      p = host.setBadge(text);
+    } catch (e) {
+      s.errBadge = '角标设置失败（badge 权限？）：' + errText(e);
+      render();
+      return;
+    }
+    if (!p || typeof p.then !== 'function') return;
+    p.then(() => { s.errBadge = ''; render(); })
+     .catch((e) => { s.errBadge = '角标设置失败：' + errText(e); render(); });
+  }
+
+  /* ---------------- 计时核心 ---------------- */
+
+  function stopLoop() {
+    if (s.timerId !== null) { clearInterval(s.timerId); s.timerId = null; }
+  }
+
+  function startLoop() {
+    stopLoop();
+    // 200ms 步进只为准点，真正 emit 仍是每秒一次（见 lastEmitSec 闸门）
+    s.timerId = setInterval(tick, 200);
+  }
+
+  function tick() {
+    if (!s.running) return;
+    const left = Math.max(0, Math.ceil((s.endAt - Date.now()) / 1000));
+    s.remaining = left;
+    if (left <= 0) { advance(); return; }
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (nowSec !== s.lastEmitSec) {
+      s.lastEmitSec = nowSec;
+      broadcast();
+      syncBadge(false);
+    }
+    render();
+  }
+
+  // 阶段自然结束：专注完成 → 轮数 +1 并切到休息；休息完成 → 切回专注
+  function advance() {
+    const finished = s.phase;
+    if (finished === 'focus') {
+      s.cycles = Math.max(0, intOf(s.cycles, 0)) + 1;
+      saveCycles();
+    }
+    s.phase = finished === 'focus' ? 'break' : 'focus';
+    s.remaining = phaseSeconds(s.phase);
+    if (cfg.autoStart === true) {
+      s.endAt = Date.now() + s.remaining * 1000;
+      s.running = true;
+    } else {
+      s.running = false;
+      stopLoop();
+    }
+    s.lastEmitSec = Math.floor(Date.now() / 1000);
+    broadcast();      // 阶段切换立即广播一次
+    syncBadge(true);  // 阶段切换立即更新角标
+    render();
+  }
+
+  function start() {
+    if (s.running) return;
+    if (s.phase === 'idle') {
+      s.phase = 'focus';
+      s.remaining = phaseSeconds('focus');
+    }
+    if (s.remaining <= 0) s.remaining = phaseSeconds(s.phase);
+    s.running = true;
+    s.endAt = Date.now() + s.remaining * 1000;
+    s.lastEmitSec = -1;
+    startLoop();
+    broadcast();
+    syncBadge(true);
+    render();
+  }
+
+  function pause() {
+    if (!s.running) return;
+    s.remaining = Math.max(0, Math.ceil((s.endAt - Date.now()) / 1000));
+    s.running = false;
+    stopLoop();
+    broadcast();      // 暂停立即广播
+    syncBadge(true);  // 暂停要立刻把角标改成「暂停」
+    render();
+  }
+
+  function reset() {
+    s.running = false;
+    stopLoop();
+    s.phase = 'idle';
+    s.remaining = phaseSeconds('focus');
+    broadcast();      // 停止立即广播
+    syncBadge(true);  // 空闲 → 传空字符串清除角标
+    render();
+  }
+
+  /* ---------------- 配置 ---------------- */
+
+  function applyConfig(next) {
+    if (!next || typeof next !== 'object') return;
+    if (next.focusMin !== undefined) cfg.focusMin = next.focusMin;
+    if (next.breakMin !== undefined) cfg.breakMin = next.breakMin;
+    if (next.autoStart !== undefined) cfg.autoStart = next.autoStart === true;
+    if (typeof next.accent === 'string' && /^#([0-9a-fA-F]{3,8})$/.test(next.accent.trim())) {
+      cfg.accent = next.accent.trim();
+    }
+    // 只在空闲（或已归零）时同步新的时长，别把用户正在跑的这一轮改掉
+    if (!s.running && (s.phase === 'idle' || s.remaining <= 0)) {
+      s.remaining = phaseSeconds(s.phase === 'break' ? 'break' : 'focus');
+    }
+    render();
+  }
+
+  /* ---------------- 启动 ---------------- */
+
+  // show / config 的监听必须在 ready() 之前挂上：宿主是在 ready() 完成时就发 show，
+  // 挂在 then 里有概率错过这一次。
+  host.on('config', (next) => { applyConfig(next); if (s.booted && s.phase === 'idle') broadcast(); });
+  host.on('show', () => { if (s.booted) { syncBadge(true); render(); } });
+
+  dom.start.addEventListener('click', () => { if (s.booted) start(); });
+  dom.pause.addEventListener('click', () => { if (s.booted) pause(); });
+  dom.reset.addEventListener('click', () => { if (s.booted) reset(); });
+
+  // 不调用 ready() 会被宿主判定失败并隔离，必须调用。
+  host.ready()
+    .then(() => host.getConfig())
+    .then((c) => {
+      s.cycles = loadCycles();
+      applyConfig(c || {});
+      s.booted = true;
+      s.remaining = phaseSeconds('focus');
+      render();
+      syncBadge(true);
+      broadcast(); // 启动即广播一次空闲状态，监视器马上能看到总线在动
+      if (s.errStore) render();
+    })
+    .catch(() => {
+      s.booted = false;
+      stopLoop();
+      dom.phase.textContent = '初始化失败';
+      dom.time.textContent = '--:--';
+      dom.time.style.color = '#fca5a5';
+      dom.start.disabled = true;
+      dom.pause.disabled = true;
+      dom.reset.disabled = true;
+      dom.foot.style.display = 'none';
+      dom.err.textContent = '无法连接宿主，请在管理界面重载本小部件';
+      dom.err.style.display = 'block';
+    });
+
+  render();
+</script>
+</body>
+</html>
