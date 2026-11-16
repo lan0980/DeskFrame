@@ -20,6 +20,7 @@
   .panel { background: #fff; border: 1px solid #e4e8ee; border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
   .panel h2 { margin: 0 0 10px; font-size: 14px; font-weight: 500; }
   label.toggle { display: inline-flex; align-items: center; gap: 6px; margin-right: 20px; font-size: 13px; }
+  .note { display: none; margin-top: 10px; font-size: 12px; color: #7a5b12; background: #fdf6e3; border: 1px solid #f0e0b0; border-radius: 7px; padding: 7px 11px; }
   .card { background: #fff; border: 1px solid #e4e8ee; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }
   .card .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .name { font-weight: 500; }
@@ -28,6 +29,7 @@
   .tag.on { background: #e1f5ee; color: #0f6e56; }
   .tag.off { background: #f1efe8; color: #5f5e5a; }
   .tag.bad { background: #fcebeb; color: #a32d2d; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: #2d6ce0; color: #fff; }
   .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
   .config { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e4e8ee; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
   .config label { font-size: 12px; color: #475569; display: inline-flex; gap: 6px; align-items: center; }
@@ -57,6 +59,7 @@
     <label class="toggle"><input type="checkbox" id="allowNetwork"> 允许小部件联网（默认关闭）</label>
     <label class="toggle"><input type="checkbox" id="launchAtLogin"> 开机自启（仅用户级）</label>
     <label class="toggle"><input type="checkbox" id="autoHideOnFullscreen"> 全屏应用时隐藏小部件</label>
+    <div class="note" id="fsNote"></div>
   </div>
   <div id="list"></div>
 </section>
@@ -84,11 +87,29 @@
   }
 
   async function loadGlobal() {
-    const g = await invoke('getGlobal');
-    if (!g) return;
+    const info = await invoke('getInfo');
+    if (!info) return;
+    const g = info.global || {};
     $('allowNetwork').checked = !!g.allowNetwork;
     $('launchAtLogin').checked = !!g.launchAtLogin;
     $('autoHideOnFullscreen').checked = !!g.autoHideOnFullscreen;
+
+    // State plainly when the full-screen switch cannot possibly do anything,
+    // instead of letting a dead checkbox look like it works.
+    const fs = info.fullscreen || {};
+    let msg = '';
+    if (!g.autoHideOnFullscreen) {
+      msg = '';
+    } else if (fs.supported === false) {
+      msg = '当前平台无法检测全屏应用，此开关不生效。';
+    } else if (fs.running === false) {
+      msg = '全屏检测未运行' + (fs.reason ? '：' + fs.reason : '');
+    } else {
+      msg = fs.active ? '已检测到全屏应用，小部件正临时隐藏。' : '全屏检测运行中，当前未检测到全屏应用。';
+    }
+    const note = $('fsNote');
+    note.textContent = msg;
+    note.style.display = msg ? 'block' : 'none';
   }
 
   function configField(id, key, def, value) {
@@ -116,10 +137,13 @@
       const tag = w.quarantined
         ? '<span class="tag bad">已隔离</span>'
         : (w.enabled ? '<span class="tag on">已启用</span>' : '<span class="tag off">已停用</span>');
+      const live = w.running ? (w.ready ? ' · 运行中' : ' · 等待 ready') : '';
+      const slept = w.running && w.hidden ? ' · 全屏避让中' : '';
       const cfgs = Object.entries(w.configSchema || {}).map(([k, def]) => configField(w.id, k, def, (w.config || {})[k])).join('');
       return '<div class="card">' +
         '<div class="row"><span class="name">' + esc(w.name) + '</span>' + tag +
-        '<span class="meta">' + esc(w.id) + ' · v' + esc(w.version) + (w.running ? ' · 运行中' : '') + '</span></div>' +
+        (w.badge ? '<span class="badge">' + esc(w.badge) + '</span>' : '') +
+        '<span class="meta">' + esc(w.id) + ' · v' + esc(w.version) + live + slept + '</span></div>' +
         (w.description ? '<div class="meta">' + esc(w.description) + '</div>' : '') +
         '<div class="meta">权限：' + esc((w.permissions || []).join(', ') || '无') + '</div>' +
         '<div class="actions">' +
@@ -131,6 +155,7 @@
           '<label>不透明度<input type="range" min="0.1" max="1" step="0.05" value="' + (state.opacity == null ? 1 : state.opacity) + '" data-state="opacity" data-id="' + esc(w.id) + '"></label>' +
           '<label><input type="checkbox" data-state="clickThrough" data-id="' + esc(w.id) + '" ' + (state.clickThrough ? 'checked' : '') + '> 点击穿透</label>' +
           '<label><input type="checkbox" data-state="alwaysOnTop" data-id="' + esc(w.id) + '" ' + (state.alwaysOnTop ? 'checked' : '') + '> 置顶</label>' +
+          '<label><input type="checkbox" data-state="locked" data-id="' + esc(w.id) + '" ' + (state.locked ? 'checked' : '') + '> 锁定位置</label>' +
           cfgs +
         '</div></div>';
     }).join('');
@@ -159,7 +184,9 @@
   for (const key of ['allowNetwork', 'launchAtLogin', 'autoHideOnFullscreen']) {
     $(key).onchange = async (e) => {
       await invoke('setGlobal', { [key]: e.target.checked });
-      say('设置已保存：' + key + ' = ' + e.target.checked);
+      say('设置已保存：' + key + (e.target.checked ? ' 已开启' : ' 已关闭'));
+
+      await loadGlobal();
     };
   }
 
@@ -192,6 +219,7 @@
   loadGlobal();
   refresh();
   setInterval(refresh, 4000);
+  setInterval(loadGlobal, 4000);
 </script>
 </body>
 </html>

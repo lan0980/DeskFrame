@@ -5,13 +5,14 @@ const path = require('path');
 const EventEmitter = require('events');
 const AdmZip = require('adm-zip');
 const WidgetWindow = require('./widget-window');
+const FullscreenWatcher = require('./fullscreen-watch');
 
 const PROTOCOL = 1;
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/;
 const ALLOWED_PERMISSIONS = new Set([
   'config.read', 'config.write', 'system.time', 'system.info',
   'clipboard.read', 'clipboard.write', 'open-external',
-  'widget.resize', 'log', 'network'
+  'widget.resize', 'log', 'network', 'bus', 'badge'
 ]);
 const MAX_FAILURES = 5;
 const FAILURE_WINDOW_MS = 60000;
@@ -32,6 +33,8 @@ class WidgetRegistry extends EventEmitter {
     this.quarantine = new Set();
     this.watcher = null;
     this.watchTimer = null;
+    this.fullscreen = new FullscreenWatcher((lvl, scope, msg) => this.settings.log(lvl, scope, msg));
+    this.fullscreen.on('change', (active) => this.applyFullscreen(active));
   }
 
   async start() {
@@ -42,6 +45,7 @@ class WidgetRegistry extends EventEmitter {
       if (st.enabled) this.spawn(id);
     }
     this.watch();
+    this.setFullscreenPreference(this.settings.getGlobal().autoHideOnFullscreen);
   }
 
   validate(m, folderName, folder) {
@@ -109,11 +113,16 @@ class WidgetRegistry extends EventEmitter {
       const inst = new WidgetWindow({
         id, folder: rec.folder, manifest: rec.manifest, state, settings: this.settings,
         onGone: (wid, reason) => this.handleGone(wid, reason),
-        onReady: (wid) => this.settings.log('info', wid, 'ready'),
+        onReady: (wid) => {
+          this.settings.log('info', wid, 'ready');
+          this.emit('changed');
+        },
         onBounds: (wid, bounds) => this.settings.setWidgetState(wid, bounds)
       });
       this.instances.set(id, inst);
       inst.create();
+      // A widget spawned while something is full-screen must not pop over it.
+      if (this.fullscreen.fullscreen) inst.setHostHidden(true);
       this.settings.log('info', id, 'loaded');
     } catch (err) {
       this.instances.delete(id);
@@ -132,10 +141,8 @@ class WidgetRegistry extends EventEmitter {
     rec.times.push(now);
     this.failures.set(id, rec);
     const st = this.settings.widgetState(id);
-    if (!st || !st.enabled) {
-      this.emit('changed');
-      return;
-    }
+    this.emit('changed');
+    if (!st || !st.enabled) return;
     if (rec.times.length > MAX_FAILURES) {
       this.quarantine.add(id);
       this.settings.log('error', id, 'more than 5 failures in 60s, quarantined');
@@ -157,10 +164,46 @@ class WidgetRegistry extends EventEmitter {
     return null;
   }
 
+  // Fan out a widget's bus message. Only widgets that declared the `bus` permission
+  // receive it, and the sender never receives its own echo.
+  broadcast(fromId, name, payload) {
+    let delivered = 0;
+    for (const [id, inst] of this.instances) {
+      if (id === fromId) continue;
+      if (!(inst.manifest.permissions || []).includes('bus')) continue;
+      if (!inst.ready) continue;
+      inst.send('bus', { name, payload, from: fromId });
+      delivered += 1;
+    }
+    return delivered;
+  }
+
+  setFullscreenPreference(on) {
+    if (on) {
+      const started = this.fullscreen.start();
+      if (!started) this.settings.log('warn', 'registry', 'full-screen auto-hide could not start');
+    } else {
+      this.fullscreen.stop();
+      this.applyFullscreen(false);
+    }
+    return this.fullscreenStatus();
+  }
+
+  fullscreenStatus() {
+    return this.fullscreen.status();
+  }
+
+  applyFullscreen(active) {
+    for (const inst of this.instances.values()) inst.setHostHidden(active);
+    this.settings.log('info', 'fullscreen', active ? 'widgets hidden' : 'widgets restored');
+    this.emit('changed');
+  }
+
   list() {
     const out = [];
     for (const [id, rec] of this.manifests) {
       const st = this.settings.widgetState(id) || {};
+      const inst = this.instances.get(id);
       out.push({
         id,
         name: rec.manifest.name,
@@ -171,6 +214,9 @@ class WidgetRegistry extends EventEmitter {
         config: st.config || {},
         enabled: !!st.enabled,
         running: this.instances.has(id),
+        ready: !!(inst && inst.ready),
+        hidden: !!(inst && inst.hostHidden),
+        badge: st.badge || '',
         quarantined: this.quarantine.has(id),
         state: st
       });
@@ -316,6 +362,7 @@ class WidgetRegistry extends EventEmitter {
   stop() {
     if (this.watcher) this.watcher.close();
     clearTimeout(this.watchTimer);
+    this.fullscreen.stop();
     for (const inst of this.instances.values()) inst.destroy();
     this.instances.clear();
   }

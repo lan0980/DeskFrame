@@ -2,9 +2,13 @@
 
 const { ipcMain, BrowserWindow, dialog, shell, clipboard, app } = require('electron');
 const os = require('os');
-const path = require('path');
 
 const MAX_MESSAGE = 1024 * 1024;
+const MAX_EVENT_NAME = 64;
+const MAX_BADGE = 24;
+
+// Every widget-facing method must be listed here; a method missing from this map is
+// rejected outright, so an unknown IPC call can never fall through to a wrong branch.
 const METHOD_PERMISSION = {
   ready: null,
   close: null,
@@ -18,9 +22,9 @@ const METHOD_PERMISSION = {
   resize: 'widget.resize',
   setOpacity: 'widget.resize',
   setClickThrough: 'widget.resize',
-  setBadge: 'log',
-  log: 'log',
-  emit: 'log'
+  setBadge: 'badge',
+  emit: 'bus',
+  log: 'log'
 };
 
 class Bridge {
@@ -30,7 +34,7 @@ class Bridge {
   }
 
   register() {
-    ipcMain.handle('df:call', (_event, req) => this.handleWidgetCall(_event, req));
+    ipcMain.handle('df:call', (event, req) => this.handleWidgetCall(event, req));
     ipcMain.handle('df:manager', (event, req) => this.handleManagerCall(event, req));
   }
 
@@ -68,7 +72,15 @@ class Bridge {
 
       case 'getState': {
         const st = this.settings.widgetState(id) || {};
-        return { enabled: !!st.enabled, size: st.size, opacity: st.opacity, clickThrough: st.clickThrough, alwaysOnTop: st.alwaysOnTop };
+        return {
+          enabled: !!st.enabled,
+          size: st.size,
+          opacity: st.opacity,
+          clickThrough: st.clickThrough,
+          alwaysOnTop: st.alwaysOnTop,
+          locked: !!st.locked,
+          badge: st.badge || ''
+        };
       }
 
       case 'setConfig': {
@@ -104,7 +116,7 @@ class Bridge {
         return clipboard.readText();
 
       case 'clipboardWrite':
-        clipboard.writeText(String(args[0] || ''));
+        clipboard.writeText(String(args[0] || '').slice(0, 100000));
         return true;
 
       case 'openExternal': {
@@ -136,21 +148,37 @@ class Bridge {
         return v;
       }
 
-      case 'setBadge':
-        this.settings.log('info', id, `badge: ${String(args[0] || '')}`);
+      // The badge is persisted on widget state and shown by the manager window, so a
+      // widget can leave a visible status marker without drawing any chrome itself.
+      case 'setBadge': {
+        const raw = args[0];
+        const text = (raw === null || raw === undefined || raw === false)
+          ? ''
+          : String(raw).slice(0, MAX_BADGE);
+        this.settings.setWidgetState(id, { badge: text });
+        this.registry.emit('changed');
         return true;
+      }
+
+      // Message bus: fan the event out to every running widget that declared `bus`,
+      // excluding the sender so a widget never sees the echo of its own emit().
+      case 'emit': {
+        const name = String(args[0] || '').trim().slice(0, MAX_EVENT_NAME);
+        if (!name) throw new Error('event name is required');
+        const payload = args.length > 1 ? args[1] : null;
+        const encoded = JSON.stringify(payload);
+        if (encoded === undefined) throw new Error('payload must be JSON-serializable');
+        if (encoded.length > MAX_MESSAGE) throw new Error('payload exceeds 1 MB');
+        const delivered = this.registry.broadcast(id, name, payload);
+        return { name, delivered };
+      }
 
       case 'log':
-        this.settings.log(String(args[0] || 'info'), id, String(args[1] || ''));
-        return true;
-
-      case 'emit':
-        this.settings.log('info', id, `emit: ${String(args[0] || '')}`);
+        this.settings.log(String(args[0] || 'info'), id, String(args[1] || '').slice(0, 4000));
         return true;
 
       case 'close':
-        inst.send('hide', { id });
-        if (inst.win && !inst.win.isDestroyed()) inst.win.hide();
+        inst.hideByWidget();
         return true;
 
       default:
@@ -173,7 +201,8 @@ class Bridge {
           widgetsDir: this.settings.widgetsDir,
           logsDir: this.settings.logsDir,
           settingsFile: this.settings.file,
-          global: this.settings.getGlobal()
+          global: this.settings.getGlobal(),
+          fullscreen: this.registry.fullscreenStatus()
         };
 
       case 'getGlobal':
@@ -191,6 +220,10 @@ class Bridge {
           } catch (err) {
             this.settings.log('warn', 'manager', `autostart unavailable: ${err.message}`);
           }
+        }
+        // The watcher only earns its cost while the user actually wants the hiding.
+        if (Object.prototype.hasOwnProperty.call(allowed, 'autoHideOnFullscreen')) {
+          this.registry.setFullscreenPreference(g.autoHideOnFullscreen);
         }
         return g;
       }
@@ -258,6 +291,7 @@ class Bridge {
           if (st.enabled) this.registry.spawn(id);
         }
         this.registry.watch();
+        this.registry.setFullscreenPreference(this.settings.getGlobal().autoHideOnFullscreen);
         return this.settings.getGlobal();
       }
 

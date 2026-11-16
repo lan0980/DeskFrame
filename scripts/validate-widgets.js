@@ -6,6 +6,9 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..', 'widgets');
 const PROTOCOL = 1;
+// Must stay identical to ALLOWED_PERMISSIONS in host/widget-registry.js — the cloud
+// gate and the runtime gate have to agree, or a widget can pass CI yet be denied at
+// runtime (or, worse, the reverse).
 const ALLOWED_PERMISSIONS = new Set([
   'config.read',
   'config.write',
@@ -16,8 +19,11 @@ const ALLOWED_PERMISSIONS = new Set([
   'open-external',
   'widget.resize',
   'log',
-  'network'
+  'network',
+  'bus',
+  'badge'
 ]);
+
 const ALLOWED_SCHEMA_TYPES = new Set(['boolean', 'string', 'number', 'enum', 'color']);
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/;
 

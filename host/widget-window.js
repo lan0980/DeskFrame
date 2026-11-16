@@ -14,6 +14,12 @@ class WidgetWindow {
     this.readyTimer = null;
     this.boundsTimer = null;
     this.disposed = false;
+    // Two independent reasons a window can be hidden: the widget asked for it via
+    // close(), or the host hid it while something else owns the full screen. Keeping
+    // them apart is what stops auto-hide from resurrecting a widget the user closed.
+    this.widgetHidden = false;
+    this.hostHidden = false;
+    this.wasVisibleBeforeHostHide = false;
   }
 
   create() {
@@ -27,16 +33,19 @@ class WidgetWindow {
     const x = Number.isFinite(pos.x) ? pos.x : Math.round(area.x + (area.width - width) / 2);
     const y = Number.isFinite(pos.y) ? pos.y : Math.round(area.y + (area.height - height) / 2);
 
-    // Network is OFF unless the widget declares it AND the user opted in.
-    const netAllowed = (this.manifest.permissions || []).includes('network') &&
-      !!this.settings.getGlobal().allowNetwork;
+    // Network stays OFF unless the widget declares it AND the user opted in. The global
+    // switch is read per request instead of being snapshotted here: flipping the toggle
+    // does not recreate this window, so a captured value would keep blocking traffic
+    // until the host restarted — the toggle would look broken.
+    const declaresNetwork = (this.manifest.permissions || []).includes('network');
     const partition = `persist:df-${this.id}`;
     try {
       const ses = session.fromPartition(partition);
       ses.webRequest.onBeforeRequest((details, cb) => {
         const u = details.url || '';
         const local = /^(file|data|blob|devtools):/i.test(u);
-        const net = netAllowed && /^https?:/i.test(u);
+        const net = declaresNetwork && !!this.settings.getGlobal().allowNetwork && /^https?:/i.test(u);
+
         cb({ cancel: !(local || net) });
       });
     } catch (err) {
@@ -68,6 +77,7 @@ class WidgetWindow {
     this.win = win;
     win.setOpacity(typeof this.state.opacity === 'number' ? this.state.opacity : 1);
     win.setIgnoreMouseEvents(!!this.state.clickThrough, { forward: true });
+    if (this.state.locked) win.setMovable(false);
 
     const contents = win.webContents;
     contents.on('will-navigate', (event, url) => {
@@ -80,9 +90,10 @@ class WidgetWindow {
     contents.on('render-process-gone', (_e, details) => {
       this.fail(`render-process-gone: ${details && details.reason ? details.reason : 'unknown'}`);
     });
+
     contents.on('did-finish-load', () => {
       if (this.disposed) return;
-      win.showInactive();
+      if (!this.hostHidden) win.showInactive();
       this.armReadyTimer();
     });
     win.on('move', () => this.scheduleBoundsSave());
@@ -97,6 +108,11 @@ class WidgetWindow {
       this.fail('load-failed');
     });
   }
+
+  // A widget page runs with sandbox + contextIsolation, so it can never reach Node.
+  // That boundary is enforced by Electron itself; the host deliberately does not eval
+  // anything inside the renderer to double-check it — verifying by injection would
+  // contradict the very isolation guarantee the docs promise.
 
   isLocal(url) {
     if (typeof url !== 'string' || !url.startsWith('file://')) return false;
@@ -157,14 +173,41 @@ class WidgetWindow {
     }
   }
 
+  // Widget called deskframe.close() on itself: remember it so full-screen restore skips it.
+  hideByWidget() {
+    this.widgetHidden = true;
+    this.send('hide', { id: this.id });
+    if (this.win && !this.win.isDestroyed()) this.win.hide();
+  }
+
+  // Host-driven visibility for the full-screen case. Restoring never overrides a
+  // widget's own close(), and hiding remembers what was actually on screen.
+  setHostHidden(active) {
+    if (this.disposed || !this.win || this.win.isDestroyed()) return;
+    if (active) {
+      if (this.hostHidden) return;
+      this.hostHidden = true;
+      this.wasVisibleBeforeHostHide = this.win.isVisible();
+      if (this.wasVisibleBeforeHostHide) this.win.hide();
+      return;
+    }
+    if (!this.hostHidden) return;
+    this.hostHidden = false;
+    if (this.wasVisibleBeforeHostHide && !this.widgetHidden) this.win.showInactive();
+    this.wasVisibleBeforeHostHide = false;
+  }
+
   scheduleBoundsSave() {
     clearTimeout(this.boundsTimer);
     this.boundsTimer = setTimeout(() => {
       if (this.disposed || !this.win || this.win.isDestroyed()) return;
       try {
+        const st = this.settings.widgetState(this.id) || {};
         const [x, y] = this.win.getPosition();
         const [w, h] = this.win.getSize();
-        this.onBounds(this.id, { position: { x, y }, size: { w, h } });
+        // A locked widget keeps its slot: only the size may be remembered.
+        if (st.locked) this.onBounds(this.id, { size: { w, h } });
+        else this.onBounds(this.id, { position: { x, y }, size: { w, h } });
       } catch (_) { /* isolated */ }
     }, 400);
   }
@@ -174,6 +217,9 @@ class WidgetWindow {
     if (typeof partial.opacity === 'number') this.win.setOpacity(Math.min(1, Math.max(0.1, partial.opacity)));
     if (typeof partial.clickThrough === 'boolean') this.win.setIgnoreMouseEvents(partial.clickThrough, { forward: true });
     if (typeof partial.alwaysOnTop === 'boolean') this.win.setAlwaysOnTop(partial.alwaysOnTop);
+    if (typeof partial.locked === 'boolean') {
+      try { this.win.setMovable(!partial.locked); } catch (_) { /* unsupported platform */ }
+    }
     if (partial.size && this.win.resizable) this.win.setSize(partial.size.w, partial.size.h);
   }
 
