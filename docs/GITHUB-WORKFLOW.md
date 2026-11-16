@@ -10,7 +10,7 @@
 | **Codespaces** | `Code → Codespaces → Create codespace` | 需要 `npm install`、`npm start` 预览或调试宿主；依赖装在云端容器，配置见 `.devcontainer/devcontainer.json` |
 | **网页上传** | `Add file → Upload files` | 把本地写好的整个文件夹拖进来；注意隐藏目录，见 [UPLOAD-GUIDE.md](../UPLOAD-GUIDE.md) |
 
-github.dev 里改完在 `Source Control` 面板提交，就是一个 commit。网页登录状态下你本身就是仓库协作者，编辑与提交权限来自仓库权限，与任何第三方集成无关。
+github.dev 里改完在 `Source Control` 面板提交，就是一个 commit。
 
 ## 二、写一个小部件
 
@@ -21,34 +21,47 @@ github.dev 里改完在 `Source Control` 面板提交，就是一个 commit。�
 5. 按 [WIDGET-API.md](WIDGET-API.md) 声明 `permissions` 与 `configSchema`，只声明真正用到的
 6. 提交到 `main`
 
-需要持久保存用户产生的内容用 `localStorage`，宿主给每个小部件分配了独立持久会话分区；沙箱内没有文件系统 API。
+想持久保存用户产生的内容用 `localStorage`，宿主给每个小部件分配了独立持久会话分区；沙箱内没有文件系统 API。
+
+**放文件到 `widgets/` 目录就意味着发给所有用户**：这里的每个文件夹都会被构建进宿主安装包、在别人的首次启动时自动出现。只给自己用的，放到 `%AppData%\DeskFrame\widgets\` 就好，不用进仓库。
 
 ## 三、云端自动做什么
 
-push 到 `main` 会按路径命中触发两条工作流（`.github/workflows/`），也可以在工作流页面点 `Run workflow` 手动重跑：
-
-| 工作流 | 触发路径 | 产出 |
+| 工作流 | 触发 | 做什么 |
 |---|---|---|
-| `Validate and pack widgets` | `widgets/**`、`scripts/validate-widgets.js`、该工作流文件 | 校验全部清单 → 每个 `widgets/<id>/` 打成 `<id>.widget.zip` → 发布到滚动 Release `widgets-latest`，同时留一份构建产物 |
-| `Build host (portable)` | `host/**`、`package.json`、该工作流文件 | Windows runner 上 `npm install` + `electron-builder --win` → 产出单个 `DeskFrame-win-x64.exe` → 发布到滚动 Release `latest` |
+| `Build host (portable)` | push 到 `main` 命中 `host/**`、`widgets/**`、`package.json`、`CHANGELOG.md`；或推 `v*` 标签 | Windows runner 校验小部件清单 → `npm install` → `npx electron-builder --win` 打出含内置小部件的单个 exe。**只有 `v*` 标签那次才会创建 Release** |
+| `Validate and pack widgets` | push 到 `main` 命中 `widgets/**` 或校验脚本 | 校验全部清单，并把每个 `widgets/<id>/` 打成 `<id>.widget.zip` 留作构建产物（方便单独发给别人分享），不创建 Release |
 
-宿主打包只收 `host/**` 与 `package.json`，`widgets/` 不会被打进 exe——框架本体始终不含任何小部件。
+向 `main` 的推送会构建但**不发版**，这样 Releases 页面留下的都是真实版本号，不会堆积一次性构建。
 
-两条都是滚动发布，同名产物每次覆盖，不会堆积版本。`widgets-latest` 只在存在可打包的小部件时发布，光有 `_template` 不会出现，这是正常的。
+## 四、发一个版本
 
-要给某个版本打固定发布点：`Releases → Draft a new release`，tag 填 `host-v0.1.0` 或 `widgets-v0.1.0`，再手动跑一次对应工作流即可。
+1. 改 `package.json` 的 `version`，并在 `CHANGELOG.md` 顶部加一段 `## <版本号>`，写清新增 / 修复 / 变更
+2. 提交这两处改动，push 到 `main`
+3. 打标签并推送：
 
-## 四、交付给别人
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
 
-对方只需要：打开 Releases → 下载 `DeskFrame-win-x64.exe` 和需要的 `<id>.widget.zip` → 双击 exe → 管理界面点「安装 .widget.zip」。不需要 GitHub 账号以外的任何东西，详见 [LOADING.md](LOADING.md)。
+CI 会用 `scripts/release-notes.js` 从 CHANGELOG 抽出 `1.1.0` 那一段作为发布正文，把 `DeskFrame-win-x64.exe` 与同目录的 `.sha256` 校验文件挂到 Release 上，标题为 `DeskFrame v1.1.0`，并标记为最新版本。
+
+**标签名必须与 `package.json` 版本、CHANGELOG 段落三者一致**：抽不到对应段落时构建会直接失败，不会发出一份没有说明的版本。标签推上去之后不要改写历史来改版本号，宁可废弃该 Release 重新发一个新版本号。
+
+## 五、交付给别人
+
+对方只需要：打开 Releases → 下载 `DeskFrame-win-x64.exe` → 双击。小部件已经在里面了，不需要额外安装步骤。详见 [LOADING.md](LOADING.md)。
 
 仓库是私有的话，Release 附件也必须登录才能下载；要让别人直接下载需在 `Settings` 底部转为 Public。
 
-## 五、作为模板仓库
+## 六、作为模板仓库
 
-`Settings → Template repository` 勾选后，别人可以用 `Use this template` 复制整套框架，在自己的 GitHub 上按上面的流程写小部件。转为 Public 或模板之前，检查提交历史里不要留下本机绝对路径或凭据。
+`Settings → Template repository` 勾选后，别人可以用 `Use this template` 复制整套框架，在自己的 GitHub 上按上面的流程写小部件。别人 fork 后 `widgets/` 里的内置成品也会一并带走并按需自动安装，不想保留就删掉对应文件夹。
 
-## 六、许可与素材
+转为 Public 或设为模板之前，检查提交历史里不要留下本机绝对路径或凭据。
+
+## 七、许可与素材
 
 - 依赖只用 MIT 类许可，见 `THIRD-PARTY-NOTICES.md`，不要引入 GPL/AGPL/LGPL
 - 字体用 Inter / Noto Sans SC（SIL OFL），图标用 Lucide / Tabler（MIT/ISC）
