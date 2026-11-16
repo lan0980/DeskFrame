@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>时钟</title>
+<style>
+  /* 硬性规范：透明无边框窗口，铺满整个小部件区域 */
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    box-sizing: border-box; padding: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  /* 视觉基准卡片（无边框窗口必须声明 drag 区域，否则拖不动） */
+  .card {
+    box-sizing: border-box; width: 100%; height: 100%;
+    padding: 16px 22px; border-radius: 16px; color: #fff;
+    background: rgba(24, 28, 40, .55); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .18);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    -webkit-app-region: drag;
+  }
+  /* 所有可交互控件必须显式 no-drag，否则点不到 */
+  button, input, select, a, .nodrag { -webkit-app-region: no-drag; }
+
+  #time { font-weight: 300; letter-spacing: 2px; line-height: 1.15; white-space: nowrap; }
+  #time .sec { font-size: .6em; opacity: .75; margin-left: 2px; letter-spacing: 0; }
+  #date { margin-top: 6px; font-size: 12px; opacity: .72; letter-spacing: 1px; white-space: nowrap; }
+  #bar { margin-top: 8px; width: 34px; height: 3px; border-radius: 2px; background: #7c6cf0; }
+  #error { display: none; font-size: 13px; line-height: 1.6; opacity: .9; }
+
+  .sizes { margin-top: 8px; display: flex; gap: 6px; }
+  .sizes button {
+    font-family: inherit; font-size: 11px; color: rgba(255, 255, 255, .8);
+    padding: 3px 10px; border-radius: 10px; cursor: pointer;
+    background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .18);
+  }
+  .sizes button:hover { background: rgba(255, 255, 255, .18); color: #fff; }
+  .sizes button.active { color: #111; border-color: transparent; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div id="time"><span id="hm">--:--</span><span id="ss" class="sec"></span></div>
+    <div id="date">加载中…</div>
+    <div id="bar"></div>
+    <div class="sizes" id="sizes">
+      <button type="button" id="btnCompact">紧凑</button>
+      <button type="button" id="btnExpanded">展开</button>
+    </div>
+    <div id="error"></div>
+  </div>
+<script>
+  // window.deskframe 是唯一的宿主接口：沙箱里没有 Node、没有 require、没有 fs。
+  const host = window.deskframe;
+  const SIZES = { compact: { w: 200, h: 96 }, expanded: { w: 300, h: 150 } };
+  const WEEK = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+
+  let cfg = { format24h: true, showSeconds: true, showDate: true, accent: '#7c6cf0', fontSize: 34 };
+  let ready = false;
+  let timer = null;
+
+  const el = (id) => document.getElementById(id);
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function numSize(v, fallback) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    return Math.min(96, Math.max(12, Math.round(n)));
+  }
+
+  function color(v) {
+    return (typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v)) ? v : '#7c6cf0';
+  }
+
+  function showFailure(text) {
+    el('time').classList.add('hidden');
+    el('date').classList.add('hidden');
+    el('bar').classList.add('hidden');
+    el('sizes').classList.add('hidden');
+    const box = el('error');
+    box.textContent = text || '初始化失败';
+    box.style.display = 'block';
+  }
+
+  // 主渲染：时间大字 + 日期星期小字
+  function paint() {
+    if (!ready) return;
+    const now = new Date();
+    const h = now.getHours();
+    const hh = cfg.format24h ? pad(h) : pad(h % 12 || 12);
+    el('hm').textContent = hh + ':' + pad(now.getMinutes());
+    el('ss').textContent = cfg.showSeconds ? ':' + pad(now.getSeconds()) : '';
+
+    const accent = color(cfg.accent);
+    el('hm').style.color = accent;
+    el('ss').style.color = accent;
+    el('bar').style.background = accent;
+    el('time').style.fontSize = numSize(cfg.fontSize, 34) + 'px';
+
+    if (cfg.showDate) {
+      el('date').textContent =
+        now.getFullYear() + '年' + pad(now.getMonth() + 1) + '月' + pad(now.getDate()) + '日 · ' + WEEK[now.getDay()];
+      el('date').classList.remove('hidden');
+    } else {
+      el('date').classList.add('hidden');
+    }
+    highlightMode();
+  }
+
+  // 两个尺寸按钮：紧凑 200x96 / 展开 300x150
+  let currentMode = '';
+
+  function applySize(mode) {
+    const s = SIZES[mode];
+    if (!s) return;
+    currentMode = mode;
+    Promise.resolve()
+      .then(() => host.resize(s.w, s.h))
+      .then(() => highlightMode())
+      .catch(() => { highlightMode(); });
+  }
+
+  function highlightMode() {
+    el('btnCompact').classList.toggle('active', currentMode === 'compact');
+    el('btnExpanded').classList.toggle('active', currentMode === 'expanded');
+    const accent = color(cfg.accent);
+    el('btnCompact').style.background = currentMode === 'compact' ? accent : '';
+    el('btnExpanded').style.background = currentMode === 'expanded' ? accent : '';
+  }
+
+  function startTimer() {
+    if (timer) clearInterval(timer);
+    timer = setInterval(paint, 1000);
+  }
+
+  // 启动流程：必须调用 host.ready()，否则宿主会在 60 秒内隔离本小部件。
+  host.ready()
+    .then(() => host.getConfig())
+    .then((c) => {
+      cfg = Object.assign(cfg, c || {});
+      // 字号非法时把合法值写回配置，方便管理界面显示与持久化。
+      const fixed = numSize(cfg.fontSize, 34);
+      if (Number(cfg.fontSize) !== fixed) {
+        cfg.fontSize = fixed;
+        Promise.resolve().then(() => host.setConfig({ fontSize: fixed })).catch(() => {});
+      }
+      ready = true;
+      paint();
+      startTimer();
+      // 用宿主保存的窗口尺寸推断当前档位，仅做按钮高亮。
+      return Promise.resolve().then(() => host.getState()).catch(() => null);
+    })
+    .then((state) => {
+      const s = state && state.size;
+      if (s && Number(s.w) <= SIZES.compact.w && Number(s.h) <= SIZES.compact.h) currentMode = 'compact';
+      else if (s) currentMode = 'expanded';
+      highlightMode();
+    })
+    .catch(() => { showFailure('初始化失败，请在管理界面重启小部件'); });
+
+  // 管理界面改配置会广播到这里。
+  host.on('config', (next) => {
+    cfg = Object.assign(cfg, next || {});
+    paint();
+  });
+  host.on('show', paint);
+
+  el('btnCompact').addEventListener('click', () => applySize('compact'));
+  el('btnExpanded').addEventListener('click', () => applySize('expanded'));
+</script>
+</body>
+</html>

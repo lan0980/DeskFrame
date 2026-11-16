@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>系统监控</title>
+<style>
+  /* 硬性规范：透明无边框窗口，铺满整个小部件区域 */
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    box-sizing: border-box; padding: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  /* 视觉基准卡片（无边框窗口必须声明 drag 区域，否则拖不动） */
+  .card {
+    box-sizing: border-box; width: 100%; height: 100%;
+    padding: 16px 22px; border-radius: 16px; color: #fff;
+    background: rgba(24, 28, 40, .55); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .18);
+    display: flex; flex-direction: column; justify-content: center; gap: 7px;
+    -webkit-app-region: drag;
+  }
+  /* 所有可交互控件必须显式 no-drag */
+  button, input, select, a, .nodrag { -webkit-app-region: no-drag; }
+
+  .row { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; }
+  .label { opacity: .7; letter-spacing: .5px; }
+  .value { font-size: 13px; font-weight: 500; letter-spacing: .5px; white-space: nowrap; }
+  .pct { font-size: 12px; opacity: .85; margin-left: 6px; }
+
+  /* 纯 CSS 宽度百分比进度条 */
+  .track {
+    height: 8px; border-radius: 5px; overflow: hidden;
+    background: rgba(255, 255, 255, .14);
+  }
+  #memBar { height: 100%; width: 0%; border-radius: 5px; background: #4ade80; transition: width .35s ease; }
+
+  #error { display: none; font-size: 13px; line-height: 1.6; text-align: center; opacity: .9; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div id="body">
+      <div class="row" id="cpuRow">
+        <span class="label">CPU</span>
+        <span class="value" id="cpuValue">--</span>
+      </div>
+      <div class="row">
+        <span class="label">内存</span>
+        <span class="value"><span id="memValue">--</span><span class="pct" id="memPct">--</span></span>
+      </div>
+      <div class="track"><div id="memBar"></div></div>
+      <div class="row">
+        <span class="label">运行时长</span>
+        <span class="value" id="upValue">--</span>
+      </div>
+      <div class="row">
+        <span class="label">平台</span>
+        <span class="value" id="osValue">--</span>
+      </div>
+    </div>
+    <div id="error"></div>
+  </div>
+<script>
+  // window.deskframe 是唯一的宿主接口：沙箱里没有 Node、没有 require、没有 fs。
+  const host = window.deskframe;
+
+  let cfg = { refreshSec: 3, showCpu: true, barColor: '#4ade80' };
+  let info = null;      // 最近一次 host.systemInfo() 的真实数据
+  let timer = null;
+  let started = false;
+  let failed = false;
+
+  const el = (id) => document.getElementById(id);
+
+  function safeInt(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+
+  function refreshSeconds(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return 3;
+    return Math.max(1, Math.round(n)); // 最小 1 秒
+  }
+
+  function barColor(v) {
+    return (typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v)) ? v : '#4ade80';
+  }
+
+  function gib(bytes) {
+    return (bytes / 1073741824).toFixed(1) + ' GB';
+  }
+
+  // 运行时长按「X天X小时X分」格式化
+  function uptimeText(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return d + '天' + h + '小时' + m + '分';
+  }
+
+  function showFailure() {
+    failed = true;
+    el('body').classList.add('hidden');
+    const box = el('error');
+    box.textContent = '无法读取系统信息';
+    box.style.display = 'block';
+  }
+
+  function paint() {
+    if (!info) return;
+    failed = false;
+    el('body').classList.remove('hidden');
+    el('error').style.display = 'none';
+
+    // CPU：宿主返回的真实核心数
+    const cores = safeInt(info.cpus);
+    el('cpuValue').textContent = cores === null ? '--' : cores + ' 核心';
+    el('cpuRow').classList.toggle('hidden', !cfg.showCpu || cores === null);
+
+    // 内存：百分比 =（总量 - 空闲）/ 总量
+    const total = safeInt(info.totalMemoryBytes);
+    const free = safeInt(info.freeMemoryBytes);
+    if (total && total > 0 && free !== null) {
+      const used = Math.max(0, total - free);
+      const pct = Math.min(100, Math.max(0, (used / total) * 100));
+      el('memValue').textContent = gib(used) + ' / ' + gib(total);
+      el('memPct').textContent = pct.toFixed(0) + '%';
+      el('memBar').style.width = pct.toFixed(1) + '%';
+    } else {
+      el('memValue').textContent = '--';
+      el('memPct').textContent = '--';
+      el('memBar').style.width = '0%';
+    }
+    el('memBar').style.background = barColor(cfg.barColor);
+
+    // 运行时长
+    const up = safeInt(info.uptimeSeconds);
+    el('upValue').textContent = up === null ? '--' : uptimeText(up);
+
+    // 平台与架构
+    const p = typeof info.platform === 'string' ? info.platform : '';
+    const a = typeof info.arch === 'string' ? info.arch : '';
+    el('osValue').textContent = (p + (a ? ' · ' + a : '')) || '--';
+  }
+
+  function tick() {
+    // 全部数据来自宿主，任何字段都不做编造填充。
+    Promise.resolve()
+      .then(() => host.systemInfo())
+      .then((data) => { info = data || null; paint(); })
+      .catch((err) => {
+        const msg = (err && err.message) ? err.message : String(err);
+        showFailure();
+        try { host.log('error', 'sysmon: systemInfo 调用失败 - ' + msg); } catch (_) {}
+      });
+  }
+
+  function startTimer() {
+    if (timer) clearInterval(timer);
+    const sec = refreshSeconds(cfg.refreshSec);
+    timer = setInterval(tick, sec * 1000);
+  }
+
+  // 启动流程：必须调用 host.ready()，否则宿主会在 60 秒内隔离本小部件。
+  host.ready()
+    .then(() => host.getConfig())
+    .then((c) => {
+      cfg = Object.assign(cfg, c || {});
+      // 刷新间隔非法时写回合法值，保证管理界面与运行时刻一致。
+      const sec = refreshSeconds(cfg.refreshSec);
+      if (Number(cfg.refreshSec) !== sec) {
+        cfg.refreshSec = sec;
+        Promise.resolve().then(() => host.setConfig({ refreshSec: sec })).catch(() => {});
+      }
+      started = true;
+      tick();        // 页面加载后立即取一次，不等第一个 interval
+      startTimer();
+    })
+    .catch(() => { showFailure(); });
+
+  // 管理界面改配置会广播到这里。
+  host.on('config', (next) => {
+    cfg = Object.assign(cfg, next || {});
+    if (failed) { tick(); return; }
+    if (started) { paint(); startTimer(); }
+  });
+  host.on('show', paint);
+</script>
+</body>
+</html>
