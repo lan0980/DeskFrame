@@ -1,5 +1,8 @@
 name: Validate and pack widgets
 
+# Bundled widgets now ship inside the host executable, so this workflow no longer
+# publishes a separate release. It still gates bad manifests, and keeps per-widget
+# .widget.zip files as build artifacts for sharing one widget on its own.
 on:
   push:
     branches: [main]
@@ -10,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pack-widgets
@@ -42,30 +45,11 @@ jobs:
             [ -f "$dir/widget.json" ] || continue
             (cd "$dir" && zip -r "../../artifacts/${name}.widget.zip" . -x "*.DS_Store")
           done
+          ls -l artifacts || true
 
-      - name: Check for widget packs
-        id: check
-        shell: bash
-        run: |
-          count=$(find artifacts -name "*.widget.zip" 2>/dev/null | wc -l)
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-
-      - name: Upload build artifacts
-        if: steps.check.outputs.count != '0'
+      - name: Upload widget packs
         uses: actions/upload-artifact@v4
         with:
           name: widget-packs
           path: artifacts/*.widget.zip
-          if-no-files-found: ignore
-
-      - name: Publish to widgets-latest release
-        if: steps.check.outputs.count != '0'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: widgets-latest
-          name: DeskFrame Widget Packs
-          body: |
-            Automated widget packing from commit ${{ github.sha }}
-          files: artifacts/*.widget.zip
-          prerelease: true
-          make_latest: false
+          if-no-files-found: error

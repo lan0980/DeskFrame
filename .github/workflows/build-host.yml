@@ -1,19 +1,25 @@
 name: Build host (portable)
 
+# A version is published only when a v* tag is pushed. Pushes to main still build and
+# validate, so a broken tree is caught, but they no longer create release entries.
 on:
   push:
     branches: [main]
     paths:
       - 'host/**'
+      - 'widgets/**'
       - 'package.json'
+      - 'CHANGELOG.md'
       - '.github/workflows/build-host.yml'
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: build-host
+  group: build-host-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,18 +30,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Remove stale nested folder
-        continue-on-error: true
-        shell: bash
-        run: |
-          if [ -d "deskframe" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git rm -r deskframe
-            git commit -m "chore: remove stale nested upload folder"
-            git push
-          fi
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -45,32 +39,62 @@ jobs:
         # npm install, not npm ci: this repo does not track a lockfile (see .gitignore).
         run: npm install
 
+      - name: Validate widget manifests
+        run: node scripts/validate-widgets.js
+
       - name: Build portable exe
         run: npx electron-builder --win
 
-      - name: Remove obsolete zip asset
+      - name: List build output
+        shell: bash
+        run: ls -l dist
+
+      - name: Preview release notes on branch builds
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          node scripts/release-notes.js "$version" -o preview-notes.md
+          head -n 12 preview-notes.md
+
+      - name: Prepare release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum DeskFrame-win-x64.exe > DeskFrame-win-x64.exe.sha256 && cat DeskFrame-win-x64.exe.sha256)
+
+      - name: Write release notes from CHANGELOG
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: node scripts/release-notes.js "${{ github.ref_name }}" -o release-notes.md
+
+      - name: Publish versioned release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DeskFrame ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            dist/DeskFrame-win-x64.exe
+            dist/DeskFrame-win-x64.exe.sha256
+          prerelease: false
+          draft: false
+          make_latest: true
+
+      # The rolling preview releases were an artifact of the pre-versioning setup; once a
+      # real version exists they only clutter the releases page.
+      - name: Retire earlier rolling releases
+        if: startsWith(github.ref, 'refs/tags/v')
         continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api "repos/${{ github.repository }}/releases/tags/latest" \
-            --jq '.assets[] | select(.name == "DeskFrame-win-x64.zip") | .id' 2>/dev/null \
-          | while read -r id; do
-              gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
-            done
-
-      - name: Publish to latest release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: DeskFrame (Latest Build)
-          body: |
-            Automated portable build from commit ${{ github.sha }}
-
-            **Download** `DeskFrame-win-x64.exe` and double-click to run. No install, no extraction needed.
-
-            > Rolling release — always reflects the latest build of the `main` branch.
-          files: dist/DeskFrame-win-x64.exe
-          prerelease: true
-          make_latest: false
+          for tag in latest widgets-latest; do
+            id="$(gh api "repos/${{ github.repository }}/releases/tags/$tag" --jq .id 2>/dev/null || true)"
+            if [ -n "$id" ]; then
+              gh api -X DELETE "repos/${{ github.repository }}/releases/$id" \
+                && echo "retired rolling release: $tag"
+            fi
+          done
