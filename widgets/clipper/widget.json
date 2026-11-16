@@ -1,0 +1,36 @@
+{
+  "protocol": 1,
+  "id": "clipper",
+  "name": "剪贴板速览",
+  "version": "1.0.0",
+  "author": "DeskFrame",
+  "description": "读取系统剪贴板纯文本并速览，支持把预设短语一键复制回剪贴板。",
+  "entry": "index.html",
+  "permissions": ["config.read", "config.write", "clipboard.read", "clipboard.write"],
+  "window": {
+    "width": 280,
+    "height": 170,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": false
+  },
+  "configSchema": {
+    "phrase": {
+      "type": "string",
+      "default": "https://github.com",
+      "label": "快捷复制内容"
+    },
+    "autoPoll": {
+      "type": "boolean",
+      "default": true,
+      "label": "自动监听剪贴板变化"
+    },
+    "maxLen": {
+      "type": "number",
+      "default": 120,
+      "label": "显示字符上限"
+    }
+  }
+}

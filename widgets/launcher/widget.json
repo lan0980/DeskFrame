@@ -1,0 +1,36 @@
+{
+  "protocol": 1,
+  "id": "launcher",
+  "name": "快速启动",
+  "version": "1.0.0",
+  "author": "DeskFrame",
+  "description": "一列可点击的启动项，用系统默认浏览器打开网址；支持自行增删，列表保存在小部件自己的持久分区。",
+  "entry": "index.html",
+  "permissions": ["config.read", "config.write", "open-external"],
+  "window": {
+    "width": 240,
+    "height": 200,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": true
+  },
+  "configSchema": {
+    "columns": {
+      "type": "number",
+      "default": 1,
+      "label": "每行列数"
+    },
+    "title": {
+      "type": "string",
+      "default": "快速启动",
+      "label": "标题"
+    },
+    "showUrl": {
+      "type": "boolean",
+      "default": false,
+      "label": "显示完整网址"
+    }
+  }
+}

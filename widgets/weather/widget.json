@@ -1,0 +1,41 @@
+{
+  "protocol": 1,
+  "id": "weather",
+  "name": "天气",
+  "version": "1.0.0",
+  "author": "DeskFrame",
+  "description": "通过 open-meteo 公开接口显示当前天气，演示宿主「联网默认关闭」的权限门控。",
+  "entry": "index.html",
+  "permissions": ["config.read", "config.write", "network", "log"],
+  "window": {
+    "width": 240,
+    "height": 140,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": false
+  },
+  "configSchema": {
+    "latitude": {
+      "type": "number",
+      "default": 29.56,
+      "label": "纬度"
+    },
+    "longitude": {
+      "type": "number",
+      "default": 106.55,
+      "label": "经度"
+    },
+    "city": {
+      "type": "string",
+      "default": "重庆",
+      "label": "显示的城市名"
+    },
+    "refreshMin": {
+      "type": "number",
+      "default": 30,
+      "label": "刷新间隔（分钟）"
+    }
+  }
+}
