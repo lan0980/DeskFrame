@@ -88,5 +88,4 @@ widgets/                       示例小部件与模板
 
 ## 许可
 
-MIT，见 [LICENSE](LICENSE)。
-软件按现状提供，使用前请自行备份。
+MIT，见 [LICENSE](LICENSE)。软件按现状提供，使用前请自行备份。
