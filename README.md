@@ -62,15 +62,23 @@
 
 ## 版本与发布
 
-版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)，变更记在 [CHANGELOG.md](CHANGELOG.md)。
+版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)，每次变更记在 [CHANGELOG.md](CHANGELOG.md)。**发版由版本号驱动**：把 `package.json` 里的 `version` 抬上去，并在 `CHANGELOG.md` 顶部补一段同版本号的说明，推送到 `main` 之后 CI 就会：
 
-推一个 `v*` 标签就会发布新版本：CI 构建出 `DeskFrame-win-x64.exe` 与 `.sha256` 校验文件，从 CHANGELOG 抽取该版本的说明段落作为发布正文，挂到对应 tag 上。
+1. 校验小部件清单、构建出 `DeskFrame-win-x64.exe` 与 `.sha256` 校验文件
+2. 为该版本号补打 `v<版本号>` 标签
+3. 用 CHANGELOG 对应段落作为正文创建 Release，并标记为最新版本
+
+`version` 没变的推送只构建和校验，不会重复发版，所以 Releases 页面留下的都是真实版本而不是构建流水。直接推 `v*` 标签同样会发布。
+
+三者必须一致：`package.json` 的 `version`、`CHANGELOG.md` 的段落标题、生成的标签名。CHANGELOG 里找不到对应段落时构建会失败，不会发出一份没有说明的版本。
 
 ```bash
-git tag v1.1.0 && git push origin v1.1.0
+# 发新版本只需要：改 package.json 的 version + 在 CHANGELOG.md 顶部加一段
+git add package.json CHANGELOG.md
+git commit -m "release: v1.1.0"
+git push origin main
 ```
 
-向 `main` 的推送同样会构建，但只用于验证改动，不产生发布条目——这样 Releases 页面留下的都是真正的版本。
 
 ## 目录
 
