@@ -40,9 +40,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          node-version: '20'
 
       - name: Install dependencies
+        # npm install, not npm ci: this repo does not track a lockfile (see .gitignore).
         run: npm install
+
+
 
       - name: Build portable exe
         run: npx electron-builder --win
