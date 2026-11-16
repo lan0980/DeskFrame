@@ -1,50 +1,49 @@
-# 上传修正卡 · 先看这一页
+# 仓库上传与云端构建准备
 
-> ✅ **2026-11-16 更新：** 隐藏文件（`.github/workflows/`、`.devcontainer/`、`.gitignore`）已全部写入仓库，两个工作流均已跑通，`latest` Release 已有成品。以下内容保留，作为以后手动上传 / 重建仓库时的参考。
+本项目的构建全部由 GitHub Actions 在云端完成，不需要本地工具链。用 GitHub 网页上传或新建仓库副本时，有两件事容易漏，漏掉的表现是 Actions 一次都没跑、Releases 为空。
 
-> 历史问题：仓库里第一版文件**被放进了 `deskframe/` 子文件夹**，而且 `.github/`、`.devcontainer/`、`.gitignore` 这三个隐藏项没有上传成功，导致工作流一次都没跑过、Releases 为空。代码本身没问题，只是位置不对。
+## 一、隐藏目录必须进得去
 
-## 只需要一次「全选 + 拖拽 + 提交」
+Windows 资源管理器默认不显示以点开头的项，`Ctrl + A` 也就选不中它们，于是 `.github/` 被静默跳过，云端构建永远不会被触发。
 
-1. 打开本机文件夹 `F:\cs\deskframe`
-2. 在资源管理器点 **查看 → 显示 → 隐藏的项目**（把勾打开）
-   —— 这一步最关键，不开就选不中 `.github`，云端构建永远不会触发
-3. **进到文件夹里面**按 `Ctrl + A` 全选，把所有内容拖到 GitHub 仓库主页的文件列表区
-   —— 不要拖外层那个 `deskframe` 文件夹本身
-4. 在上传列表里确认下面这些都在，然后点 **Commit changes**
+1. 资源管理器 **查看 → 显示 → 隐藏的项目** 打勾
+2. **进入项目文件夹内部**再 `Ctrl + A` 全选，把选中的内容拖到仓库主页的文件列表区
+   —— 拖外层文件夹本身会让所有内容多套一层目录，GitHub 只认仓库根目录下的 `.github/workflows/`
+3. 提交前核对这四项都在：
 
-## 上传列表里必须能看到的 4 个隐藏项
+```
+.github/workflows/build-host.yml
+.github/workflows/pack-widgets.yml
+.devcontainer/devcontainer.json
+.gitignore
+```
 
-- `.github/workflows/build-host.yml`
-- `.github/workflows/pack-widgets.yml`
-- `.devcontainer/devcontainer.json`
-- `.gitignore`
+## 二、放开工作流写权限
 
-其余正常的：`package.json`、`host/`、`widgets/`、`docs/`、`scripts/`、`README.md`、`LICENSE`、`UPLOAD-GUIDE.md` 等。
+`Settings → Actions → General → Workflow permissions` → **Read and write permissions** → **Save**。
 
-## 提交后再设置一次（只做这一次）
+不设这一步，工作流在发布 Release 时会返回 403。改动后对已在运行的任务无效，需要点 `Re-run jobs` 重跑。
 
-`Settings → Actions → General → Workflow permissions` → 选 **Read and write permissions** → **Save**
+## 提交之后会发生什么
 
-不勾这个，发布 Release 那一步会报 403。
-
-## 之后自动发生
-
-| 位置 | 会出现什么 |
+| 位置 | 产出 |
 |---|---|
-| Actions | `Build host (portable)` 和 `Validate and pack widgets` 两个工作流（首次约 2–10 分钟） |
-| Releases → `latest` | `DeskFrame-win-x64.exe`，双击即可运行（绿色单文件，不用解压不用安装） |
-| Releases → `widgets-latest` | 你自己写的小部件包 `<id>.widget.zip`（目前只有模板，暂时为空，正常） |
+| Actions | `Build host (portable)` 与 `Validate and pack widgets` 两条工作流，首次约 2–10 分钟 |
+| Releases → `latest` | `DeskFrame-win-x64.exe`，双击即可运行的绿色单文件 |
+| Releases → `widgets-latest` | 每个 `widgets/<id>/` 对应的 `<id>.widget.zip` |
 
-`build-host.yml` 里还带了一步**云端自动清理**：第一次构建时会把旧的 `deskframe/` 嵌套目录自动删掉，仓库自己变干净，你不用手动删。
+两条工作流都是滚动发布：每次命中触发条件都会覆盖同名产物，不会产生一堆版本堆积。也可以在工作流页面点 `Run workflow` 手动重跑，不必重新上传文件。
 
-## 卡住了看这里
+## 排查
 
-| 现象 | 处理 |
+| 现象 | 原因 |
 |---|---|
-| Actions 页一片空白 | 说明 `.github/workflows/` 没上传成功，重复上面第 2–4 步 |
-| 工作流红了、提示 403 | 没设 Read and write permissions，设完点 `Re-run jobs` |
-| 只有 `latest`，没有 `widgets-latest` | 正常，写了小部件包才会出 |
-| 想让别人不用登录也能下载 | `Settings` 最底部把仓库转成 Public |
+| Actions 页没有任何运行记录 | `.github/workflows/` 不在仓库根目录，回到第一节 |
+| 工作流失败并提示 403 | 工作流写权限未放开，回到第二节 |
+| 只有 `latest`，没有 `widgets-latest` | 命中了触发条件但改动不涉及 `widgets/`；只有小部件目录或校验脚本变化时才会重跑打包 |
+| 某个小部件没出现在产物里 | 清单校验不通过（`id` 与文件夹名不符、`protocol` 不为 1、权限名不在白名单、`version` 不是 `x.y.z`），看该次运行 `Validate widget manifests` 步骤的输出 |
+| 其他人下载需要登录 | 仓库是私有的；`Settings` 最底部可转为 Public |
 
-完整说明：[docs/START-HERE.md](docs/START-HERE.md)　·　接口文档：[docs/WIDGET-API.md](docs/WIDGET-API.md)
+## 相关文档
+
+接口规范 [docs/WIDGET-API.md](docs/WIDGET-API.md) · 开发流程 [docs/GITHUB-WORKFLOW.md](docs/GITHUB-WORKFLOW.md) · 使用与排错 [docs/LOADING.md](docs/LOADING.md)
