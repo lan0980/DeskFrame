@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>快速启动</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  * { box-sizing: border-box; }
+  body {
+    display: flex; align-items: stretch; justify-content: stretch;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+
+  /* 视觉基准卡片。无边框窗口靠 CSS 声明拖动区：整张卡片 drag，
+     列表/输入/按钮再挖成 no-drag，否则点不动、滚不动、也输入不了。 */
+  .card {
+    flex: 1; display: flex; flex-direction: column;
+    padding: 16px 22px; border-radius: 16px; color: #fff;
+    background: rgba(24, 28, 40, .55); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .18);
+    -webkit-app-region: drag;
+  }
+  button, input, textarea, select, a { -webkit-app-region: no-drag; }
+
+  #title {
+    flex: none; font-size: 12px; font-weight: 600; letter-spacing: 1px;
+    opacity: .8; padding-bottom: 6px; user-select: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  #list {
+    flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 6px;
+    align-content: start; -webkit-app-region: no-drag;
+  }
+  #list::-webkit-scrollbar { width: 6px; }
+  #list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .25); border-radius: 3px; }
+
+  .item { display: flex; align-items: stretch; gap: 4px; }
+  .open {
+    flex: 1; min-width: 0; border: none; border-radius: 10px; padding: 5px 9px;
+    display: flex; flex-direction: column; gap: 1px; text-align: left; cursor: pointer;
+    font-family: inherit; color: #fff; background: rgba(255, 255, 255, .10);
+  }
+  .open:hover { background: rgba(255, 255, 255, .22); }
+  .open:active { transform: translateY(1px); }
+  .open .name { font-size: 12.5px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .open .url { font-size: 10px; line-height: 1.3; opacity: .6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .del {
+    flex: none; width: 22px; border: none; border-radius: 10px; cursor: pointer;
+    font-family: inherit; font-size: 13px; line-height: 1; color: #fff;
+    background: rgba(255, 255, 255, .08);
+  }
+  .del:hover { background: rgba(214, 86, 86, .75); }
+
+  #empty { grid-column: 1 / -1; font-size: 11px; opacity: .6; line-height: 1.5; padding: 2px 2px; }
+
+  .add { flex: none; display: flex; gap: 4px; padding-top: 7px; }
+  .add input {
+    min-width: 0; border: none; border-radius: 8px; padding: 4px 7px;
+    font-family: inherit; font-size: 11px; color: #fff;
+    background: rgba(255, 255, 255, .14); outline: none;
+  }
+  .add input:focus { background: rgba(255, 255, 255, .24); }
+  .add input::placeholder { color: rgba(255, 255, 255, .55); }
+  #nameInput { flex: 0 0 58px; }
+  #urlInput { flex: 1 1 auto; }
+  #addBtn {
+    flex: none; border: none; border-radius: 8px; padding: 4px 10px; cursor: pointer;
+    font-family: inherit; font-size: 11px; color: #fff; background: rgba(124, 108, 240, .75);
+  }
+  #addBtn:hover { background: rgba(124, 108, 240, 1); }
+  #addBtn:active { transform: translateY(1px); }
+
+  #toast {
+    flex: none; height: 14px; margin-top: 5px; font-size: 10px; line-height: 14px;
+    opacity: 0; transition: opacity .4s ease; user-select: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #toast.on { opacity: .9; }
+  #toast.err { color: #ffb3b3; }
+
+  #fatal { display: none; }
+  .card.failed #fatal {
+    display: flex; flex: 1; align-items: center; justify-content: center;
+    text-align: center; font-size: 12px; line-height: 1.6; opacity: .85;
+  }
+  .card.failed #title, .card.failed #list, .card.failed .add, .card.failed #toast { display: none; }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div id="title">快速启动</div>
+
+    <div id="list"></div>
+
+    <div class="add">
+      <input id="nameInput" type="text" placeholder="名称" maxlength="60" spellcheck="false">
+      <input id="urlInput" type="text" placeholder="网址" maxlength="300" spellcheck="false">
+      <button id="addBtn" type="button">添加</button>
+    </div>
+
+    <div id="toast"></div>
+
+    <div id="fatal">快速启动初始化失败<br>请在 DeskFrame 管理界面重新加载</div>
+  </div>
+
+<script>
+  // window.deskframe 是唯一的宿主接口：沙箱内没有 Node、没有 require、没有 fs。
+  const host = window.deskframe;
+
+  const STORAGE_KEY = 'launcher.items';
+  const MAX_ITEMS = 100;
+
+  const card = document.getElementById('card');
+  const titleEl = document.getElementById('title');
+  const listEl = document.getElementById('list');
+  const nameInput = document.getElementById('nameInput');
+  const urlInput = document.getElementById('urlInput');
+  const addBtn = document.getElementById('addBtn');
+  const toastEl = document.getElementById('toast');
+
+  const DEFAULTS = { title: '快速启动', columns: 1, showUrl: false };
+  let cfg = Object.assign({}, DEFAULTS);
+
+  // localStorage 为空时的首次使用列表。
+  const BUILTIN = [
+    { name: 'GitHub', url: 'https://github.com' },
+    { name: 'MDN', url: 'https://developer.mozilla.org' },
+    { name: '维基百科', url: 'https://www.wikipedia.org' }
+  ];
+
+  let items = [];
+  let toastTimer = null;
+
+  /* ---------- 持久化：只靠独立分区的 localStorage，读取一律做异常保护 ---------- */
+
+  function sanitize(list) {
+    if (!Array.isArray(list)) return null;
+    const out = [];
+    for (const it of list) {
+      if (!it || typeof it !== 'object') continue;
+      const name = typeof it.name === 'string' ? it.name.trim().slice(0, 60) : '';
+      const url = typeof it.url === 'string' ? it.url.trim().slice(0, 500) : '';
+      if (!name || !/^https?:\/\//i.test(url)) continue;
+      out.push({ name: name, url: url });
+      if (out.length >= MAX_ITEMS) break;
+    }
+    return out;
+  }
+
+  function loadItems() {
+    let raw = null;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+    } catch (err) {
+      return BUILTIN.map(copyItem);
+    }
+    if (raw === null || raw === '') return BUILTIN.map(copyItem);
+    try {
+      const clean = sanitize(JSON.parse(raw));
+      // 解析失败或结构不对（clean === null）→ 回退内置列表；
+      // 合法的空数组说明是用户自己删光的，保留空列表。
+      if (clean === null) return BUILTIN.map(copyItem);
+      return clean;
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function saveItems() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      return true;
+    } catch (err) {
+      toast('本地存储不可用，未能保存', true);
+      return false;
+    }
+  }
+
+  function copyItem(it) { return { name: it.name, url: it.url }; }
+
+  /* ---------- 网址处理：非 http(s) 一律在本地拦下，不丢给宿主 ---------- */
+
+  function normalizeUrl(input) {
+    let raw = String(input == null ? '' : input).trim();
+    if (!raw) return { ok: false, reason: '请输入网址' };
+    // javascript: / file: / data: 等其它协议直接拒绝。
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^https?:/i.test(raw)) {
+      return { ok: false, reason: '仅支持 http/https 链接' };
+    }
+    if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw;
+    const m = /^https?:\/\/([^\s/?#]+)/i.exec(raw);
+    const hostName = m ? m[1] : '';
+    if (!hostName || hostName.indexOf('.') === -1 || /[\s@]/.test(hostName)) {
+      return { ok: false, reason: '网址格式不正确' };
+    }
+    return { ok: true, url: raw };
+  }
+
+  function openUrl(url) {
+    const norm = normalizeUrl(url);
+    if (!norm.ok) { toast(norm.reason, true); return; }
+    if (!host || typeof host.openExternal !== 'function') {
+      toast('宿主接口不可用', true);
+      return;
+    }
+    // 宿主只放行 http/https，且未声明 open-external 权限时会抛错。
+    Promise.resolve(host.openExternal(norm.url))
+      .then(() => toast('已在浏览器打开'))
+      .catch((err) => toast('打开失败：' + explain(err), true));
+  }
+
+  function explain(err) {
+    const msg = err && err.message ? String(err.message) : '';
+    if (/permission denied/i.test(msg)) return '缺少打开链接的权限';
+    if (/only http\/https/i.test(msg)) return '仅支持 http/https 链接';
+    return msg ? msg.slice(0, 40) : '未知错误';
+  }
+
+  /* ---------- 提示条：短暂显示后淡出 ---------- */
+
+  function toast(text, isError) {
+    clearTimeout(toastTimer);
+    toastEl.textContent = text;
+    toastEl.classList.toggle('err', !!isError);
+    toastEl.classList.add('on');
+    toastTimer = setTimeout(() => toastEl.classList.remove('on'), isError ? 3200 : 1800);
+  }
+
+  /* ---------- 渲染 ---------- */
+
+  function columnsOf(value) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(4, Math.max(1, n));
+  }
+
+  function makeItem(item, index) {
+    const row = document.createElement('div');
+    row.className = 'item';
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'open';
+    open.title = item.url;
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = item.name;
+    open.appendChild(name);
+
+    if (cfg.showUrl) {
+      const url = document.createElement('span');
+      url.className = 'url';
+      url.textContent = item.url;
+      open.appendChild(url);
+    }
+
+    open.addEventListener('click', () => openUrl(item.url));
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'del';
+    del.textContent = '×';
+    del.title = '删除「' + item.name + '」';
+    del.addEventListener('click', () => {
+      items.splice(index, 1);
+      saveItems();
+      render();
+      toast('已删除');
+    });
+
+    row.appendChild(open);
+    row.appendChild(del);
+    return row;
+  }
+
+  function render() {
+    titleEl.textContent = (typeof cfg.title === 'string' && cfg.title.trim()) ? cfg.title : DEFAULTS.title;
+    listEl.style.gridTemplateColumns = 'repeat(' + columnsOf(cfg.columns) + ', minmax(0, 1fr))';
+
+    listEl.textContent = '';
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.id = 'empty';
+      empty.textContent = '暂无启动项，在下方填写名称和网址后点「添加」。';
+      listEl.appendChild(empty);
+      return;
+    }
+    items.forEach((item, index) => listEl.appendChild(makeItem(item, index)));
+  }
+
+  function addItem() {
+    const name = nameInput.value.trim().slice(0, 60);
+    if (!name) { toast('请先输入名称', true); nameInput.focus(); return; }
+    const norm = normalizeUrl(urlInput.value);
+    if (!norm.ok) { toast(norm.reason, true); urlInput.focus(); return; }
+
+    if (items.length >= MAX_ITEMS) { toast('最多 ' + MAX_ITEMS + ' 个启动项', true); return; }
+    items.push({ name: name, url: norm.url });
+    if (saveItems()) {
+      nameInput.value = '';
+      urlInput.value = '';
+      render();
+      toast('已添加「' + name + '」');
+    }
+  }
+
+  addBtn.addEventListener('click', addItem);
+  urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addItem(); });
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') urlInput.focus(); });
+
+  /* ---------- 生命周期 ---------- */
+
+  function init() {
+    items = loadItems();
+    // 首次使用时把内置列表落盘，之后完全以用户列表为准。
+    const stored = (() => { try { return localStorage.getItem(STORAGE_KEY); } catch (err) { return null; } })();
+    if (stored === null || stored === '') saveItems();
+    render();
+  }
+
+  // 必须调用 ready()，否则宿主会判定小部件失败并隔离。
+  if (!host || typeof host.ready !== 'function') {
+    card.classList.add('failed');
+  } else {
+    host.ready()
+      .then(() => host.getConfig())
+      .then((c) => {
+        cfg = Object.assign(cfg, c || {});
+        init();
+      })
+      .catch(() => { card.classList.add('failed'); });
+
+    host.on('config', (next) => {
+      cfg = Object.assign(cfg, next || {});
+      render();
+    });
+
+    host.on('show', () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw !== null && raw !== '') {
+          const clean = sanitize(JSON.parse(raw));
+          if (clean) items = clean;
+        }
+      } catch (err) { /* 读取失败就继续用内存里的列表 */ }
+      render();
+    });
+  }
+</script>
+</body>
+</html>
