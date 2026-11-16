@@ -1,0 +1,46 @@
+{
+  "protocol": 1,
+  "id": "clock",
+  "name": "时钟",
+  "version": "1.0.0",
+  "author": "DeskFrame",
+  "description": "桌面时钟：大字时间加日期星期，支持 12/24 小时制、秒针开关、强调色、字号以及紧凑/展开两种尺寸。",
+  "entry": "index.html",
+  "permissions": ["config.read", "config.write", "widget.resize"],
+  "window": {
+    "width": 240,
+    "height": 120,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": true
+  },
+  "configSchema": {
+    "format24h": {
+      "type": "boolean",
+      "default": true,
+      "label": "24 小时制"
+    },
+    "showSeconds": {
+      "type": "boolean",
+      "default": true,
+      "label": "显示秒针"
+    },
+    "showDate": {
+      "type": "boolean",
+      "default": true,
+      "label": "显示日期"
+    },
+    "accent": {
+      "type": "color",
+      "default": "#7c6cf0",
+      "label": "强调色"
+    },
+    "fontSize": {
+      "type": "number",
+      "default": 34,
+      "label": "字号（像素）"
+    }
+  }
+}

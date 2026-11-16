@@ -1,0 +1,37 @@
+{
+  "protocol": 1,
+  "id": "sticky",
+  "name": "便签",
+  "version": "1.0.0",
+  "author": "DeskFrame",
+  "description": "可编辑的桌面便签：输入自动保存、一键清空，内容存放在小部件自己的持久分区，重启后仍在。",
+  "entry": "index.html",
+  "permissions": ["config.read", "config.write"],
+  "window": {
+    "width": 260,
+    "height": 220,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": true
+  },
+  "configSchema": {
+    "paper": {
+      "type": "color",
+      "default": "#ffd966",
+      "label": "便签底色"
+    },
+    "fontScale": {
+      "type": "number",
+      "default": 14,
+      "label": "字号"
+    },
+    "opacity": {
+      "type": "enum",
+      "default": "0.9",
+      "label": "不透明度",
+      "options": ["0.7", "0.85", "1"]
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "protocol": 1,
+  "id": "sysmon",
+  "name": "系统监控",
+  "version": "1.0.0",
+  "author": "DeskFrame",
+  "description": "系统监控：CPU 核心数、内存占用（已用/总量加百分比进度条）、系统运行时长，数据全部来自宿主 systemInfo()。",
+  "entry": "index.html",
+  "permissions": ["config.read", "config.write", "system.info", "log"],
+  "window": {
+    "width": 280,
+    "height": 150,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": false
+  },
+  "configSchema": {
+    "refreshSec": {
+      "type": "number",
+      "default": 3,
+      "label": "刷新间隔（秒）"
+    },
+    "showCpu": {
+      "type": "boolean",
+      "default": true,
+      "label": "显示 CPU"
+    },
+    "barColor": {
+      "type": "color",
+      "default": "#4ade80",
+      "label": "进度条颜色"
+    }
+  }
+}
