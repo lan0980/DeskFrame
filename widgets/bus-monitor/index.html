@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>总线事件</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    display: flex; align-items: stretch; justify-content: center;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .card {
+    box-sizing: border-box; width: 100%; height: 100%; position: relative;
+    padding: 16px 22px; border-radius: 16px; color: #fff;
+    background: rgba(24, 28, 40, .55); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .18);
+    display: flex; flex-direction: column;
+    /* 无边框窗口只有声明了拖拽区域的部位才能被拖动 */
+    -webkit-app-region: drag;
+    user-select: none; cursor: default;
+  }
+  /* 所有可交互控件必须退出拖拽区，否则点不动 */
+  button, input, select, a, .nodrag { -webkit-app-region: no-drag; }
+
+  #head {
+    display: flex; align-items: baseline; gap: 8px; flex: 0 0 auto;
+    padding-bottom: 6px; margin-bottom: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, .12);
+  }
+  #title { font-size: 13px; font-weight: 600; letter-spacing: 1px; }
+  #count { font-size: 10px; opacity: .62; }
+  #btnClear {
+    -webkit-app-region: no-drag;
+    margin-left: auto; font-family: inherit; font-size: 11px; color: #fff; cursor: pointer;
+    padding: 2px 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .26);
+    background: rgba(255, 255, 255, .08);
+  }
+  #btnClear:hover { background: rgba(255, 255, 255, .18); }
+
+  #list { flex: 1 1 auto; overflow: hidden; }
+  .row {
+    display: flex; align-items: baseline; gap: 6px;
+    font-size: 11px; line-height: 16px; white-space: nowrap;
+    color: var(--row, #93c5fd);
+  }
+  .row .t { flex: 0 0 auto; opacity: .55; font-variant-numeric: tabular-nums; }
+  .row .n { flex: 0 0 auto; color: #fff; font-weight: 600; }
+  .row .s { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .row .f { flex: 0 0 auto; opacity: .5; }
+
+  #empty {
+    position: absolute; left: 22px; right: 22px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px; line-height: 1.5; text-align: center; opacity: .55;
+  }
+  #err {
+    flex: 0 0 auto; font-size: 10px; line-height: 1.35; color: #fca5a5;
+    padding-top: 4px; display: none;
+  }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div id="head">
+      <span id="title">总线事件</span>
+      <span id="count">累计 0 条</span>
+      <button id="btnClear" type="button">清空</button>
+    </div>
+    <div id="list"></div>
+    <div id="empty">等待小部件广播…（需有声明 bus 权限的小部件在发送）</div>
+    <div id="err"></div>
+  </div>
+<script>
+  // window.deskframe 是唯一的宿主 API：沙箱内没有 Node、没有 require、没有 fs。
+  // 本小部件是消息总线的「接收方」，只做 host.on('bus', ...)，不 emit。
+  const host = window.deskframe;
+  const $ = (id) => document.getElementById(id);
+
+  const dom = {
+    card: $('card'), list: $('list'), count: $('count'),
+    empty: $('empty'), err: $('err'), clear: $('btnClear')
+  };
+
+  const cfg = { maxLines: 8, showFrom: true, onlyPomodoro: false, rowColor: '#93c5fd' };
+
+  const PHASE_CN = { focus: '专注', break: '休息', idle: '空闲' };
+  const MAX_BUFFER = 300; // 内存里最多留这么多条，够按 maxLines / 过滤条件重新渲染
+
+  const s = {
+    booted: false,
+    total: 0,      // 本次会话收到的消息总数（清空按钮不影响它）
+    errCount: 0,
+    handlerErr: '',
+    rows: []       // { ts, name, payload, from }
+  };
+
+  /* ---------------- 工具 ---------------- */
+
+  function errText(err) {
+    if (!err) return '未知错误';
+    if (typeof err === 'string') return err;
+    return err.message || String(err);
+  }
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function hhmmss(ts) {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '--:--:--';
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+
+  // 秒 → MM:SS
+  function mmss(totalSeconds) {
+    let t = Number(totalSeconds);
+    if (!isFinite(t) || t < 0) t = 0;
+    t = Math.round(t);
+    return pad(Math.floor(t / 60)) + ':' + pad(t % 60);
+  }
+
+  function clip(str, max) {
+    const t = String(str);
+    return t.length > max ? t.slice(0, max) + '…' : t;
+  }
+
+  // pomodoro 之类的已知结构转成人话；其它一律 JSON 截断到 40 字符
+  function summarize(payload) {
+    if (payload && typeof payload === 'object') {
+      const parts = [];
+      if (typeof payload.phase === 'string' && payload.phase !== '') {
+        parts.push(PHASE_CN[payload.phase] || payload.phase);
+      }
+      if (typeof payload.remaining === 'number' && isFinite(payload.remaining)) {
+        parts.push('剩余 ' + mmss(payload.remaining));
+      }
+      if (typeof payload.cycles === 'number' && isFinite(payload.cycles)) {
+        parts.push('第 ' + Math.round(payload.cycles) + ' 轮');
+      }
+      if (parts.length) return parts.join(' · ');
+    }
+    let json;
+    try {
+      json = JSON.stringify(payload === undefined ? null : payload);
+    } catch (e) {
+      json = String(payload);
+    }
+    if (typeof json !== 'string') json = String(json);
+    return clip(json, 40);
+  }
+
+  /* ---------------- 渲染 ---------------- */
+
+  function render() {
+    dom.card.style.setProperty('--row', cfg.rowColor || '#93c5fd');
+    dom.count.textContent = '累计 ' + s.total + ' 条';
+
+    const picked = cfg.onlyPomodoro ? s.rows.filter((r) => r.name === 'pomodoro') : s.rows;
+    const limit = Math.min(60, Math.max(1, Math.round(Number(cfg.maxLines)) || 8));
+    const shown = picked.slice(0, limit);
+
+    dom.list.textContent = '';
+    const frag = document.createDocumentFragment();
+    for (const r of shown) {
+      const line = document.createElement('div');
+      line.className = 'row';
+
+      const t = document.createElement('span');
+      t.className = 't';
+      t.textContent = hhmmss(r.ts);
+
+      const n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = r.name || '(未命名)';
+
+      const sum = document.createElement('span');
+      sum.className = 's';
+      sum.textContent = summarize(r.payload);
+
+      line.appendChild(t);
+      line.appendChild(n);
+      line.appendChild(sum);
+
+      if (cfg.showFrom) {
+        const f = document.createElement('span');
+        f.className = 'f';
+        f.textContent = '来自 ' + (r.from || '未知');
+        line.appendChild(f);
+      }
+      frag.appendChild(line);
+    }
+    dom.list.appendChild(frag);
+
+    dom.empty.style.display = shown.length ? 'none' : 'block';
+
+    if (s.handlerErr) {
+      dom.err.textContent = s.handlerErr;
+      dom.err.style.display = 'block';
+    } else {
+      dom.err.style.display = 'none';
+    }
+  }
+
+  /* ---------------- 接收：host.on('bus') ---------------- */
+
+  // 必须先注册监听再 ready()，否则刚启动那一瞬间在总线上流动的消息会漏掉。
+  host.on('bus', (msg) => {
+    // 单条消息出任何问题都不能打断监听，全部就地吞掉并记日志
+    try {
+      s.total += 1;
+      const m = (msg && typeof msg === 'object') ? msg : {};
+      s.rows.unshift({
+        ts: Date.now(),
+        name: typeof m.name === 'string' ? m.name : String(m.name === undefined ? '' : m.name),
+        payload: m.payload,
+        from: typeof m.from === 'string' ? m.from : String(m.from === undefined ? '' : m.from)
+      });
+      if (s.rows.length > MAX_BUFFER) s.rows.length = MAX_BUFFER;
+      if (s.booted) render();
+    } catch (e) {
+      s.errCount += 1;
+      s.handlerErr = '处理消息出错 ' + s.errCount + ' 次：' + errText(e);
+      try {
+        const p = host.log('warn', 'bus-monitor 处理 bus 消息出错：' + errText(e));
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (e2) { /* 没有 log 权限就算了，不能因此中断监听 */ }
+      try { if (s.booted) render(); } catch (e3) { /* 渲染坏了也继续收 */ }
+    }
+  });
+
+  /* ---------------- 配置 ---------------- */
+
+  function hexColor(v) {
+    return (typeof v === 'string' && /^#([0-9a-fA-F]{3,8})$/.test(v.trim())) ? v.trim() : '';
+  }
+
+  function applyConfig(next) {
+    if (!next || typeof next !== 'object') return;
+    if (next.maxLines !== undefined) cfg.maxLines = next.maxLines;
+    if (next.showFrom !== undefined) cfg.showFrom = next.showFrom !== false;
+    if (next.onlyPomodoro !== undefined) cfg.onlyPomodoro = next.onlyPomodoro === true;
+    const c = hexColor(next.rowColor);
+    if (c) cfg.rowColor = c;
+  }
+
+  /* ---------------- 启动 ---------------- */
+
+  // show / config 也要在 ready() 之前挂：宿主是在 ready() 完成时才发 show。
+  host.on('config', (next) => { applyConfig(next || {}); if (s.booted) render(); });
+  host.on('show', () => { if (s.booted) render(); });
+
+  dom.clear.addEventListener('click', () => {
+    try {
+      s.rows.length = 0; // 只清屏，累计计数保留
+      render();
+    } catch (e) {
+      s.handlerErr = '清空失败：' + errText(e);
+    }
+  });
+
+  // 不调用 ready() 会被宿主判定失败并隔离，必须调用。
+  host.ready()
+    .then(() => host.getConfig())
+    .then((c) => {
+      s.booted = true;
+      applyConfig(c || {});
+      render();
+    })
+    .catch(() => {
+      s.booted = true; // 即使配置拿不到也要继续渲染已收到的消息，只把失败提示挂出来
+      s.handlerErr = '无法连接宿主，请在管理界面重载本小部件';
+      dom.empty.textContent = '初始化失败：拿不到宿主配置';
+      dom.empty.style.color = '#fca5a5';
+      render();
+    });
+
+  render();
+</script>
+</body>
+</html>
