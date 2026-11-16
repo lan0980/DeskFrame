@@ -285,7 +285,11 @@ class Bridge {
         this.registry.stop();
         this.settings.resetAll();
         this.registry.quarantine.clear();
+        // "Restore defaults" also means handing back the factory set, including bundled
+        // widgets the user had removed: resetAll cleared the removal record just now.
+        this.registry.bundle.seed();
         this.registry.scan();
+
         for (const [id, rec] of this.registry.manifests) {
           const st = this.settings.ensureWidgetState(id, rec.manifest);
           if (st.enabled) this.registry.spawn(id);

@@ -6,6 +6,7 @@ const EventEmitter = require('events');
 const AdmZip = require('adm-zip');
 const WidgetWindow = require('./widget-window');
 const FullscreenWatcher = require('./fullscreen-watch');
+const BundleSeeder = require('./bundle-widgets');
 
 const PROTOCOL = 1;
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/;
@@ -16,6 +17,14 @@ const ALLOWED_PERMISSIONS = new Set([
 ]);
 const MAX_FAILURES = 5;
 const FAILURE_WINDOW_MS = 60000;
+
+function appVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version || '0.0.0';
+  } catch (_) {
+    return '0.0.0';
+  }
+}
 
 function isInside(base, target) {
   const rel = path.relative(base, target);
@@ -35,10 +44,20 @@ class WidgetRegistry extends EventEmitter {
     this.watchTimer = null;
     this.fullscreen = new FullscreenWatcher((lvl, scope, msg) => this.settings.log(lvl, scope, msg));
     this.fullscreen.on('change', (active) => this.applyFullscreen(active));
+    this.bundle = new BundleSeeder({
+      sourceDir: path.join(__dirname, '..', 'widgets'),
+      targetDir: this.dir,
+      settings: this.settings,
+      appVersion: appVersion(),
+      log: (lvl, scope, msg) => this.settings.log(lvl, scope, msg)
+    });
   }
 
   async start() {
     fs.mkdirSync(this.dir, { recursive: true });
+    // Put the shipped widgets in place before anything is scanned, so a first run shows
+    // a decorated desktop instead of an empty manager window.
+    this.bundle.seed();
     this.scan();
     for (const [id, rec] of this.manifests) {
       const st = this.settings.ensureWidgetState(id, rec.manifest);
@@ -200,6 +219,7 @@ class WidgetRegistry extends EventEmitter {
   }
 
   list() {
+    const bundled = new Set(this.bundle.ids());
     const out = [];
     for (const [id, rec] of this.manifests) {
       const st = this.settings.widgetState(id) || {};
@@ -216,6 +236,8 @@ class WidgetRegistry extends EventEmitter {
         running: this.instances.has(id),
         ready: !!(inst && inst.ready),
         hidden: !!(inst && inst.hostHidden),
+
+        bundled: bundled.has(id),
         badge: st.badge || '',
         quarantined: this.quarantine.has(id),
         state: st
@@ -257,6 +279,11 @@ class WidgetRegistry extends EventEmitter {
     if (rec) {
       try { fs.rmSync(rec.folder, { recursive: true, force: true }); }
       catch (err) { this.settings.log('error', id, `remove folder failed: ${err.message}`); }
+    }
+    // Remember it, otherwise the next launch would reseed a widget the user threw away.
+    if (this.bundle.ids().includes(id)) {
+      this.settings.markBundleRemoved(id);
+      this.settings.log('info', id, 'bundled widget uninstalled; will not be reseeded');
     }
     this.manifests.delete(id);
     this.settings.removeWidget(id);
