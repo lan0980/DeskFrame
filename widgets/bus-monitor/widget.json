@@ -1,0 +1,41 @@
+{
+  "protocol": 1,
+  "id": "bus-monitor",
+  "name": "总线事件",
+  "version": "1.0.0",
+  "author": "DeskFrame",
+  "description": "消息总线接收端：实时列出其它小部件 emit() 的事件流，用于验证总线是否打通、排查小部件之间的通信。配合「番茄钟」使用效果最直接。",
+  "entry": "index.html",
+  "permissions": ["bus", "config.read", "config.write", "log"],
+  "window": {
+    "width": 300,
+    "height": 200,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": true
+  },
+  "configSchema": {
+    "maxLines": {
+      "type": "number",
+      "default": 8,
+      "label": "保留条数"
+    },
+    "showFrom": {
+      "type": "boolean",
+      "default": true,
+      "label": "显示来源小部件"
+    },
+    "onlyPomodoro": {
+      "type": "boolean",
+      "default": false,
+      "label": "只看 pomodoro"
+    },
+    "rowColor": {
+      "type": "color",
+      "default": "#93c5fd",
+      "label": "文字颜色"
+    }
+  }
+}

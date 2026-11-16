@@ -1,0 +1,41 @@
+{
+  "protocol": 1,
+  "id": "pomodoro",
+  "name": "番茄钟",
+  "version": "1.0.0",
+  "author": "DeskFrame",
+  "description": "专注/休息循环计时器。每秒通过消息总线广播 pomodoro 事件，可用「总线事件」小部件直接验证跨小部件通信是否打通。",
+  "entry": "index.html",
+  "permissions": ["config.read", "config.write", "bus", "badge"],
+  "window": {
+    "width": 250,
+    "height": 160,
+    "transparent": true,
+    "frame": false,
+    "alwaysOnTop": false,
+    "clickThrough": false,
+    "resizable": false
+  },
+  "configSchema": {
+    "focusMin": {
+      "type": "number",
+      "default": 25,
+      "label": "专注时长（分钟）"
+    },
+    "breakMin": {
+      "type": "number",
+      "default": 5,
+      "label": "休息时长（分钟）"
+    },
+    "autoStart": {
+      "type": "boolean",
+      "default": false,
+      "label": "自动开始下一轮"
+    },
+    "accent": {
+      "type": "color",
+      "default": "#f97316",
+      "label": "强调色"
+    }
+  }
+}
