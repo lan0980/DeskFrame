@@ -1,7 +1,8 @@
 name: Build host (portable)
 
-# A version is published only when a v* tag is pushed. Pushes to main still build and
-# validate, so a broken tree is caught, but they no longer create release entries.
+# Publishing is driven by the version number: pushing a package.json whose version has
+# no tag yet cuts that tag and publishes it. Pushes that keep the version unchanged only
+# build and validate. Pushing a v* tag directly also publishes.
 on:
   push:
     branches: [main]
@@ -45,35 +46,75 @@ jobs:
       - name: Build portable exe
         run: npx electron-builder --win
 
-      - name: List build output
+      - name: Decide whether this build is a new version
+        id: rel
         shell: bash
-        run: ls -l dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "published by tag push: ${GITHUB_REF_NAME}"
+          else
+            version="$(node -p "require('./package.json').version")"
+            tag="v${version}"
+            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+              echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "${tag} already exists; building without publishing"
+            else
+              echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              echo "${tag} not published yet; this build will cut it"
+            fi
+          fi
 
-      - name: Preview release notes on branch builds
-        if: "!startsWith(github.ref, 'refs/tags/v')"
+      - name: Preview release notes when not publishing
+        if: steps.rel.outputs.publish == 'false'
         shell: bash
         run: |
           version="$(node -p "require('./package.json').version")"
           node scripts/release-notes.js "$version" -o preview-notes.md
-          head -n 12 preview-notes.md
+          echo "CHANGELOG matches package.json version ${version}; nothing to publish."
+
+      - name: Cut the version tag
+        if: steps.rel.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.rel.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "tag ${TAG} already present"
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${TAG}" -f "sha=${GITHUB_SHA}" --jq .ref
+            echo "created ${TAG} at ${GITHUB_SHA}"
+          fi
 
       - name: Prepare release assets
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.rel.outputs.publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
           (cd dist && sha256sum DeskFrame-win-x64.exe > DeskFrame-win-x64.exe.sha256 && cat DeskFrame-win-x64.exe.sha256)
 
       - name: Write release notes from CHANGELOG
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.rel.outputs.publish == 'true'
         shell: bash
-        run: node scripts/release-notes.js "${{ github.ref_name }}" -o release-notes.md
+        env:
+          TAG: ${{ steps.rel.outputs.tag }}
+        run: node scripts/release-notes.js "${TAG}" -o release-notes.md
 
       - name: Publish versioned release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.rel.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: DeskFrame ${{ github.ref_name }}
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: DeskFrame ${{ steps.rel.outputs.tag }}
           body_path: release-notes.md
           files: |
             dist/DeskFrame-win-x64.exe
@@ -85,16 +126,16 @@ jobs:
       # The rolling preview releases were an artifact of the pre-versioning setup; once a
       # real version exists they only clutter the releases page.
       - name: Retire earlier rolling releases
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.rel.outputs.publish == 'true'
         continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for tag in latest widgets-latest; do
-            id="$(gh api "repos/${{ github.repository }}/releases/tags/$tag" --jq .id 2>/dev/null || true)"
+            id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id 2>/dev/null || true)"
             if [ -n "$id" ]; then
-              gh api -X DELETE "repos/${{ github.repository }}/releases/$id" \
-                && echo "retired rolling release: $tag"
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" \
+                && echo "retired rolling release: ${tag}"
             fi
           done
