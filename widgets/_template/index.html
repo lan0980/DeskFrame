@@ -10,7 +10,11 @@
     padding: 18px 26px; border-radius: 16px; color: #fff;
     background: rgba(24, 28, 40, 0.55); backdrop-filter: blur(10px);
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18); text-align: center;
+    /* A frameless window is only movable where it opts in; without this the widget
+       is stuck where it first appeared even though the host saves window moves. */
+    -webkit-app-region: drag;
   }
+  button, input, select, a, .nodrag { -webkit-app-region: no-drag; }
   #clock { font-size: 34px; font-weight: 300; letter-spacing: 2px; line-height: 1.2; }
   #hint { margin-top: 6px; font-size: 11px; opacity: 0.65; }
 </style>
@@ -18,7 +22,7 @@
 <body>
   <div class="card">
     <div id="clock">--:--:--</div>
-    <div id="hint">DeskFrame widget template</div>
+    <div id="hint">拖动我 · 模板小部件</div>
   </div>
 <script>
   // window.deskframe is the ONLY host API. No Node, no fs, no require in here.
@@ -43,7 +47,7 @@
       setInterval(paint, 1000);
       host.log('info', 'template widget started');
     })
-    .catch((err) => { document.getElementById('clock').textContent = 'init failed'; });
+    .catch(() => { document.getElementById('clock').textContent = 'init failed'; });
 
   // Configuration changes made in the manager window arrive here.
   host.on('config', (next) => { cfg = Object.assign(cfg, next || {}); paint(); });
