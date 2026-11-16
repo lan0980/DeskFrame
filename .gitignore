@@ -19,3 +19,5 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+# Lockfile is not tracked: CI installs straight from package.json fields.
+package-lock.json
