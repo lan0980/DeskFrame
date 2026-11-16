@@ -14,7 +14,11 @@ function defaults() {
       launchAtLogin: false,
       allowNetwork: false
     },
-    widgets: {}
+    widgets: {},
+    // Tracks which bundled widgets this install has already been handed, and which ones
+    // the user removed on purpose. A removed bundle widget must never reappear on the
+    // next launch; only "restore defaults" is allowed to hand them out again.
+    bundle: { seededVersion: null, removed: [] }
   };
 }
 
@@ -38,6 +42,10 @@ class Settings {
           this.data = Object.assign(defaults(), parsed);
           this.data.global = Object.assign(defaults().global, parsed.global || {});
           this.data.widgets = parsed.widgets || {};
+          this.data.bundle = Object.assign(defaults().bundle, parsed.bundle || {});
+          this.data.bundle.removed = Array.isArray(this.data.bundle.removed)
+            ? this.data.bundle.removed.filter((x) => typeof x === 'string')
+            : [];
         }
       } catch (err) {
         this.log('warn', 'settings', `settings.json unreadable, using defaults: ${err.message}`);
@@ -77,6 +85,7 @@ class Settings {
         clickThrough: !!w.clickThrough,
         alwaysOnTop: !!w.alwaysOnTop,
         locked: false,
+        badge: '',
         config: this.defaultConfig(manifest)
       };
       this.save();
@@ -112,6 +121,33 @@ class Settings {
   removeWidget(id) {
     delete this.data.widgets[id];
     this.save();
+  }
+
+  // ---- bundled widget bookkeeping ----
+
+  bundleState() {
+    if (!this.data.bundle) this.data.bundle = defaults().bundle;
+    return this.data.bundle;
+  }
+
+  bundleRemoved() {
+    return new Set(this.bundleState().removed || []);
+  }
+
+  markBundleSeeded(version) {
+    const b = this.bundleState();
+    b.seededVersion = version;
+    this.save();
+    return b;
+  }
+
+  // Called when the user uninstalls a widget that came from the bundle, so the next
+  // launch leaves it alone instead of reinstalling something they deliberately removed.
+  markBundleRemoved(id) {
+    const b = this.bundleState();
+    if (!b.removed.includes(id)) b.removed.push(id);
+    this.save();
+    return b;
   }
 
   log(level, scope, msg) {
