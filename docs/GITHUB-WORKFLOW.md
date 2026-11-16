@@ -29,25 +29,29 @@ github.dev 里改完在 `Source Control` 面板提交，就是一个 commit。
 
 | 工作流 | 触发 | 做什么 |
 |---|---|---|
-| `Build host (portable)` | push 到 `main` 命中 `host/**`、`widgets/**`、`package.json`、`CHANGELOG.md`；或推 `v*` 标签 | Windows runner 校验小部件清单 → `npm install` → `npx electron-builder --win` 打出含内置小部件的单个 exe。**只有 `v*` 标签那次才会创建 Release** |
+| `Build host (portable)` | push 到 `main` 命中 `host/**`、`widgets/**`、`package.json`、`CHANGELOG.md`；或推 `v*` 标签 | Windows runner 校验小部件清单 → `npm install` → `npx electron-builder --win` 打出含内置小部件的单个 exe。若 `package.json` 的 `version` 还没有对应标签，就补打 `v<版本号>` 并创建 Release；已有标签则只构建不发版 |
 | `Validate and pack widgets` | push 到 `main` 命中 `widgets/**` 或校验脚本 | 校验全部清单，并把每个 `widgets/<id>/` 打成 `<id>.widget.zip` 留作构建产物（方便单独发给别人分享），不创建 Release |
 
-向 `main` 的推送会构建但**不发版**，这样 Releases 页面留下的都是真实版本号，不会堆积一次性构建。
+版本号没变的推送会构建、但不产生 Release 条目，所以发布页面不会堆积一次性构建。
 
 ## 四、发一个版本
 
-1. 改 `package.json` 的 `version`，并在 `CHANGELOG.md` 顶部加一段 `## <版本号>`，写清新增 / 修复 / 变更
-2. 提交这两处改动，push 到 `main`
-3. 打标签并推送：
+1. 改 `package.json` 的 `version`，例如 `1.1.0`
+2. 在 `CHANGELOG.md` 顶部加一段 `## v1.1.0 · 日期`，写清新增 / 修复 / 变更
+3. 提交这两处改动并 push 到 `main`
+
+CI 构建成功后会自动：为该版本补打 `v1.1.0` 标签 → 用 `scripts/release-notes.js` 从 CHANGELOG 抽出这一段作为发布正文 → 把 `DeskFrame-win-x64.exe` 与 `.sha256` 挂上 Release，标题 `DeskFrame v1.1.0`，标记为最新版本。
+
+也可以直接推标签来发布同一版本：
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.1.0 && git push origin v1.1.0
 ```
 
-CI 会用 `scripts/release-notes.js` 从 CHANGELOG 抽出 `1.1.0` 那一段作为发布正文，把 `DeskFrame-win-x64.exe` 与同目录的 `.sha256` 校验文件挂到 Release 上，标题为 `DeskFrame v1.1.0`，并标记为最新版本。
+**三处必须一致**：`package.json` 的 `version`、CHANGELOG 段落标题、标签名。抽不到对应段落时构建会失败，不会发出一份没有说明的版本。GitHub 不会因为 CI 自己创建的标签而重复跑一次构建，所以不存在循环发布。
 
-**标签名必须与 `package.json` 版本、CHANGELOG 段落三者一致**：抽不到对应段落时构建会直接失败，不会发出一份没有说明的版本。标签推上去之后不要改写历史来改版本号，宁可废弃该 Release 重新发一个新版本号。
+已经发布过的版本号不要改写历史去改内容：宁可发一个新版本号，或者在 Releases 页面废弃那份 Release。
+
 
 ## 五、交付给别人
 

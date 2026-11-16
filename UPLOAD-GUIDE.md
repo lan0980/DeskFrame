@@ -29,8 +29,9 @@ Windows 资源管理器默认不显示以点开头的项，`Ctrl + A` 也就选�
 | 位置 | 产出 |
 |---|---|
 | Actions | `Build host (portable)` 与 `Validate and pack widgets` 两条工作流，首次约 2–10 分钟 |
-| 推送到 `main` | 构建并校验，**不创建 Release**，所以页面不会堆积一次性构建 |
-| 推送 `v*` 标签 | 创建 `DeskFrame <标签名>` Release，附 `DeskFrame-win-x64.exe` 与 `.sha256` 校验文件，正文取自 `CHANGELOG.md` 对应版本段落 |
+| 推送到 `main`，且 `package.json` 的 `version` 还没有对应标签 | 补打 `v<版本号>` 标签并创建 Release，附 `DeskFrame-win-x64.exe` 与 `.sha256`，正文取自 `CHANGELOG.md` 对应段落 |
+| 推送到 `main`，版本号没变 | 只构建和校验，不创建 Release，页面不会堆积一次性构建 |
+| 推送 `v*` 标签 | 直接为该标签创建 Release |
 
 小部件已经打进宿主安装包，不再有单独的小部件 Release。`pack-widgets.yml` 仍会把每个 `widgets/<id>/` 压成 `<id>.widget.zip` 保留在该次运行的构建产物里，用于把某一个小部件单独发给别人。
 
@@ -42,7 +43,9 @@ Windows 资源管理器默认不显示以点开头的项，`Ctrl + A` 也就选�
 |---|---|
 | Actions 页没有任何运行记录 | `.github/workflows/` 不在仓库根目录，回到第一节 |
 | 工作流失败并提示 403 | 工作流写权限未放开，回到第二节 |
+| 构建成功但没有新 Release | `package.json` 的 `version` 与上次相同，属于预期；要发新版就先把版本号抬上去 |
 | 运行列表里显示的是文件路径而不是工作流名 | YAML 没被解析成功（重复的键、缩进错位、混进 tab）。这类失败一个 job 都不会生成，看该次运行页面的报错 |
+
 | 打了标签但没有 Release | 标签名不是 `v` 开头；标签推送本身不受 `paths` 过滤影响 |
 | 标签构建失败并提示找不到版本段落 | `CHANGELOG.md` 没有与该标签对应的 `## <版本号>` 段落，或 `package.json` 的 `version` 与标签不一致 |
 | 某个小部件没出现在产物里 | 清单校验不通过（`id` 与文件夹名不符、`protocol` 不为 1、权限名不在白名单、`version` 不是 `x.y.z`），看该次运行 `Validate widget manifests` 步骤的输出 |
