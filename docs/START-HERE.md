@@ -1,6 +1,6 @@
 # 项目导览
 
-框架由三部分组成：宿主（`host/`）、小部件（`widgets/`）、云端构建（`.github/workflows/`）。三者通过一套清单协议解耦，改动任意一部分都不会牵动其他两部分的运行时。
+框架由三部分组成：宿主（`host/`）、内置小部件（`widgets/`）、云端构建（`.github/workflows/`）。小部件与宿主靠清单协议解耦，一个坏掉不影响另一个；但打包时 `widgets/` 会进宿主安装包，所以改了内置小部件也要重新构建 exe。
 
 ## 宿主的启动链路
 
@@ -8,14 +8,22 @@
 main.js
  ├─ app.requestSingleInstanceLock()     单实例，重复启动只唤起管理窗口
  ├─ Settings.ensure()                   建目录、读 settings.json、失败回退默认值
- ├─ WidgetRegistry(settings)            持有清单表、实例表、失败计数、隔离集
+ ├─ WidgetRegistry(settings)            持有清单表、实例表、失败计数、隔离集、内置源
  ├─ Bridge(registry, settings)          注册两个 ipcMain.handle
- ├─ registry.start()                    扫描 → 校验 → 逐个 spawn → 开启目录监听
+ ├─ registry.start()                    内置小部件落位 → 扫描 → 校验 → 逐个 spawn → 目录监听
  ├─ createTray()                        托盘拿不到也不影响主流程
  └─ openManager()                       管理窗口
 ```
 
-`app.on('window-all-closed')` 被显式留空：小部件也是窗口，关掉最后一个不能退出宿主。
+`app.on('window-all-closed')` 被显式留空：小部件也是窗口，关掉最后一个不能退出宿主。测试脚手架里想中途重建 registry 时也要注意这点，否则 Electron 会直接退出把后续断言截掉。
+
+## 内置小部件怎么落位
+
+`host/bundle-widgets.js` 在 `scan()` 之前把安装包内的 `widgets/<id>/` 复制进用户目录，规则有三条：
+
+- 已存在的目录不动，用户的修改不会被覆盖
+- `settings.json` 的 `bundle.removed` 记着用户主动卸载过的内置小部件，之后不再发还；只有「恢复默认」清空这份记录才会重新装回
+- 复制用显式的 `readdir` + `readFile` + `writeFile`，不用 `fs.cpSync`——源目录打包后在 `app.asar` 里，递归复制对该场景并不可靠，半个小部件落盘看起来就跟坏掉的一样
 
 ## 一个小部件从落盘到运行
 
@@ -24,7 +32,7 @@ main.js
   → registry.scan()      readdir + 解析 widget.json
   → registry.validate()  protocol / id / version / entry 越界 / 权限名 / 尺寸 / configSchema
   → registry.spawn()     new WidgetWindow → create()
-  → 独立 session 分区     persist:df-<id>，网络拦截按声明权限 + 全局开关决定
+  → 独立 session 分区     persist:df-<id>，网络拦截按声明权限 + 全局开关实时决定
   → loadFile(entry)      entry 必须落在小部件目录内
   → did-finish-load      显示窗口，起 10 秒 ready 计时
   → 页面 host.ready()    桥接回 bridge.handleWidgetCall → markReady() → 广播 show
@@ -37,7 +45,9 @@ main.js
 | 关注点 | 位置 |
 |---|---|
 | 清单校验规则 | `host/widget-registry.js` 的 `validate()` |
+| 内置小部件落位 | `host/bundle-widgets.js` |
 | 窗口创建与网络拦截 | `host/widget-window.js` 的 `create()` |
+
 | 每个 IPC 方法需要什么权限 | `host/bridge.js` 顶部的 `METHOD_PERMISSION` |
 | 注入页面的 API 形状 | `host/preload.js` |
 | 配置与状态的落盘格式 | `host/settings.js` |
