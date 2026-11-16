@@ -46,17 +46,16 @@ jobs:
       - name: Build portable exe
         run: npx electron-builder --win
 
-      # Deleting a release does not delete the git tag it created, and a tag named
-      # "latest" reads like a second version to anyone browsing the repo. Sweep the
-      # leftovers before the publish decision, so a stale tag cannot make this run
-      # believe the version is already out.
+      # These two refs came from the old rolling-preview setup. Deleting a release does
+      # not delete the tag it created, and a tag literally named "latest" reads like a
+      # second version to anyone browsing the repo, so sweep both every build.
       - name: Retire leftover tags and releases
         continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for stale in latest widgets-latest v1.0.0; do
+          for stale in latest widgets-latest; do
             id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${stale}" --jq .id 2>/dev/null || true)"
             if [ -n "${id}" ]; then
               gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" \
