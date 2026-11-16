@@ -8,19 +8,28 @@
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif; color: #1f2329; background: #f6f8fb; }
   header { padding: 18px 24px 14px; background: #fff; border-bottom: 1px solid #e4e8ee; }
-  h1 { margin: 0; font-size: 18px; font-weight: 500; }
-  .sub { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+  h1 { margin: 0; font-size: 18px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
+  .ver { font-size: 12px; font-weight: 400; color: #475569; background: #eef2f8; border-radius: 20px; padding: 2px 9px; }
+  .sub { margin: 5px 0 0; color: #6b7280; font-size: 12px; max-width: 760px; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   button { font: inherit; font-size: 13px; padding: 7px 13px; border: 1px solid #d0d7e2; border-radius: 7px; background: #fff; color: #1f2329; cursor: pointer; }
   button:hover { background: #eef3fb; }
   button.primary { background: #2d6ce0; border-color: #2d6ce0; color: #fff; }
   button.primary:hover { background: #2159c0; }
   button.danger { color: #a32d2d; }
+  button.danger.armed { background: #a32d2d; border-color: #a32d2d; color: #fff; }
   section { padding: 16px 24px; }
   .panel { background: #fff; border: 1px solid #e4e8ee; border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
-  .panel h2 { margin: 0 0 10px; font-size: 14px; font-weight: 500; }
-  label.toggle { display: inline-flex; align-items: center; gap: 6px; margin-right: 20px; font-size: 13px; }
-  .note { display: none; margin-top: 10px; font-size: 12px; color: #7a5b12; background: #fdf6e3; border: 1px solid #f0e0b0; border-radius: 7px; padding: 7px 11px; }
+  .panel h2 { margin: 0 0 4px; font-size: 14px; font-weight: 500; }
+  .panel .hint { margin: 0 0 6px; font-size: 12px; color: #6b7280; }
+  .opt { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-top: 1px solid #f1f4f8; }
+  .opt:first-of-type { border-top: 0; }
+  .opt input[type="checkbox"] { margin-top: 3px; flex: none; }
+  .opt .txt { flex: 1; min-width: 0; }
+  .opt .txt b { font-weight: 500; font-size: 13px; display: block; }
+  .opt .txt span { font-size: 12px; color: #6b7280; display: block; }
+  .note { margin-top: 10px; font-size: 12px; color: #7a5b12; background: #fdf6e3; border: 1px solid #f0e0b0; border-radius: 7px; padding: 7px 11px; }
+  .note.hidden { display: none; }
   .card { background: #fff; border: 1px solid #e4e8ee; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }
   .card .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .name { font-weight: 500; }
@@ -29,37 +38,52 @@
   .tag.on { background: #e1f5ee; color: #0f6e56; }
   .tag.off { background: #f1efe8; color: #5f5e5a; }
   .tag.bad { background: #fcebeb; color: #a32d2d; }
+  .tag.bundled { background: #eef2ff; color: #3949ab; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: #2d6ce0; color: #fff; }
+  .perms { margin-top: 6px; font-size: 12px; color: #6b7280; }
+  .perms .p { display: inline-block; margin: 3px 6px 0 0; padding: 1px 7px; border-radius: 5px; background: #f3f5f8; color: #475569; font-size: 11px; }
   .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
   .config { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e4e8ee; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
   .config label { font-size: 12px; color: #475569; display: inline-flex; gap: 6px; align-items: center; }
-  input[type="text"], input[type="number"], select { font: inherit; font-size: 12px; padding: 4px 7px; border: 1px solid #d0d7e2; border-radius: 6px; }
+  input[type="text"], input[type="number"], select, input[type="color"] { font: inherit; font-size: 12px; padding: 4px 7px; border: 1px solid #d0d7e2; border-radius: 6px; }
   input[type="range"] { width: 110px; }
-  .empty { padding: 30px; text-align: center; color: #6b7280; background: #fff; border: 1px dashed #d0d7e2; border-radius: 10px; }
+  input[type="color"] { padding: 1px; width: 34px; height: 26px; }
+  .empty { padding: 28px; text-align: center; color: #6b7280; background: #fff; border: 1px dashed #d0d7e2; border-radius: 10px; }
+  .empty b { display: block; color: #1f2329; font-weight: 500; margin-bottom: 4px; }
   #status { position: sticky; bottom: 0; padding: 9px 24px; background: #fff; border-top: 1px solid #e4e8ee; font-size: 12px; color: #475569; }
   #status.err { color: #a32d2d; }
 </style>
 </head>
 <body>
 <header>
-  <h1>DeskFrame · 小部件管理</h1>
-  <p class="sub">宿主只负责加载、布局、配置与隔离；外观与交互由你自己的小部件决定。</p>
+  <h1>DeskFrame · 小部件管理<span class="ver" id="ver">—</span></h1>
+  <p class="sub">桌面上显示什么，取决于装了哪些小部件。这里负责安装、开关、调整和卸载。每个小部件独立运行，坏掉一个不影响其他的，也不影响系统。</p>
   <div class="bar">
-    <button class="primary" id="install">安装 .widget.zip</button>
-    <button id="addFolder">添加本地文件夹</button>
+    <button class="primary" id="install">安装小部件包</button>
+    <button id="addFolder">从文件夹添加</button>
     <button id="openDir">打开小部件目录</button>
-    <button id="openLogs">打开日志</button>
+    <button id="openLogs">查看日志</button>
     <button class="danger" id="reset">恢复默认</button>
   </div>
 </header>
 
 <section>
   <div class="panel">
-    <h2>全局设置</h2>
-    <label class="toggle"><input type="checkbox" id="allowNetwork"> 允许小部件联网（默认关闭）</label>
-    <label class="toggle"><input type="checkbox" id="launchAtLogin"> 开机自启（仅用户级）</label>
-    <label class="toggle"><input type="checkbox" id="autoHideOnFullscreen"> 全屏应用时隐藏小部件</label>
-    <div class="note" id="fsNote"></div>
+    <h2>全局开关</h2>
+    <p class="hint">默认取值偏向不打扰、不联网，用不到就保持现在的样子。</p>
+    <div class="opt">
+      <input type="checkbox" id="autoHideOnFullscreen">
+      <span class="txt"><b>有程序占满整个屏幕时暂时收起小部件</b><span>看全屏视频、玩游戏、投屏演示时自动让路，退出后自动回来。你自己关掉的小部件不会被它重新打开。</span></span>
+    </div>
+    <div class="opt">
+      <input type="checkbox" id="allowNetwork">
+      <span class="txt"><b>允许小部件联网</b><span>总开关。就算某个小部件声明了联网需求，这里不勾选它也上不了网。天气这类小部件需要打开才能取到数据。</span></span>
+    </div>
+    <div class="opt">
+      <input type="checkbox" id="launchAtLogin">
+      <span class="txt"><b>开机自动启动</b><span>只写入当前用户的启动项，不改系统设置，取消勾选即还原。</span></span>
+    </div>
+    <div class="note hidden" id="fsNote"></div>
   </div>
   <div id="list"></div>
 </section>
@@ -70,6 +94,27 @@
   const M = window.deskManager;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  // Permission names are contract identifiers; what a reader needs is what each allows.
+  const PERM_LABEL = {
+    'config.read': '读取自己的设置',
+    'config.write': '保存自己的设置',
+    'system.info': '查看电脑配置',
+    'system.time': '读取系统时间',
+    'clipboard.read': '读取剪贴板',
+    'clipboard.write': '写入剪贴板',
+    'open-external': '用浏览器打开链接',
+    'widget.resize': '调整自己的窗口',
+    'log': '写运行日志',
+    'network': '访问网络（仍需上方总开关）',
+    'bus': '与其他小部件互通消息',
+    'badge': '显示状态角标'
+  };
+
+  function permChips(perms) {
+    if (!perms || !perms.length) return '<span class="p">不需要任何权限</span>';
+    return perms.map((p) => '<span class="p">' + esc(PERM_LABEL[p] || p) + '</span>').join('');
+  }
 
   function say(msg, isError) {
     const el = $('status');
@@ -89,27 +134,23 @@
   async function loadGlobal() {
     const info = await invoke('getInfo');
     if (!info) return;
+    $('ver').textContent = 'v' + (info.version || '?');
     const g = info.global || {};
     $('allowNetwork').checked = !!g.allowNetwork;
     $('launchAtLogin').checked = !!g.launchAtLogin;
     $('autoHideOnFullscreen').checked = !!g.autoHideOnFullscreen;
 
-    // State plainly when the full-screen switch cannot possibly do anything,
-    // instead of letting a dead checkbox look like it works.
+    // State plainly when a switch cannot take effect, instead of leaving a checkbox
+    // that looks functional.
     const fs = info.fullscreen || {};
     let msg = '';
-    if (!g.autoHideOnFullscreen) {
-      msg = '';
-    } else if (fs.supported === false) {
-      msg = '当前平台无法检测全屏应用，此开关不生效。';
-    } else if (fs.running === false) {
-      msg = '全屏检测未运行' + (fs.reason ? '：' + fs.reason : '');
-    } else {
-      msg = fs.active ? '已检测到全屏应用，小部件正临时隐藏。' : '全屏检测运行中，当前未检测到全屏应用。';
-    }
+    if (!g.autoHideOnFullscreen) msg = '';
+    else if (fs.supported === false) msg = '当前系统无法检测全屏程序，这个开关不起作用。';
+    else if (fs.running === false) msg = '全屏检测未运行' + (fs.reason ? '：' + fs.reason : '');
+    else msg = fs.active ? '正在全屏避让：检测到程序占满屏幕，小部件已暂时收起。' : '全屏检测运行中，当前没有程序占满屏幕。';
     const note = $('fsNote');
     note.textContent = msg;
-    note.style.display = msg ? 'block' : 'none';
+    note.classList.toggle('hidden', !msg);
   }
 
   function configField(id, key, def, value) {
@@ -129,7 +170,9 @@
   function render(items) {
     const box = $('list');
     if (!items || !items.length) {
-      box.innerHTML = '<div class="empty">还没有小部件。点「安装 .widget.zip」加载成品包，或把小部件文件夹放进小部件目录，宿主会自动发现。</div>';
+      box.innerHTML = '<div class="empty"><b>还没有小部件</b>' +
+        '点上方「安装小部件包」选中 .widget.zip 文件，或把包含 widget.json 的文件夹放进小部件目录。<br>' +
+        '文件夹放进去就自动加载，拿走就自动卸载，不用重启。</div>';
       return;
     }
     box.innerHTML = items.map((w) => {
@@ -137,24 +180,25 @@
       const tag = w.quarantined
         ? '<span class="tag bad">已隔离</span>'
         : (w.enabled ? '<span class="tag on">已启用</span>' : '<span class="tag off">已停用</span>');
-      const live = w.running ? (w.ready ? ' · 运行中' : ' · 等待 ready') : '';
+      const live = w.running ? (w.ready ? '运行中' : '等待初始化') : '未运行';
       const slept = w.running && w.hidden ? ' · 全屏避让中' : '';
       const cfgs = Object.entries(w.configSchema || {}).map(([k, def]) => configField(w.id, k, def, (w.config || {})[k])).join('');
       return '<div class="card">' +
         '<div class="row"><span class="name">' + esc(w.name) + '</span>' + tag +
+        (w.bundled ? '<span class="tag bundled">随机附送</span>' : '') +
         (w.badge ? '<span class="badge">' + esc(w.badge) + '</span>' : '') +
-        '<span class="meta">' + esc(w.id) + ' · v' + esc(w.version) + live + slept + '</span></div>' +
+        '<span class="meta">' + esc(w.id) + ' · v' + esc(w.version) + ' · ' + live + slept + '</span></div>' +
         (w.description ? '<div class="meta">' + esc(w.description) + '</div>' : '') +
-        '<div class="meta">权限：' + esc((w.permissions || []).join(', ') || '无') + '</div>' +
+        '<div class="perms">需要：' + permChips(w.permissions) + '</div>' +
         '<div class="actions">' +
           '<button data-act="' + (w.enabled ? 'disable' : 'enable') + '" data-id="' + esc(w.id) + '">' + (w.enabled ? '停用' : '启用') + '</button>' +
-          '<button data-act="reload" data-id="' + esc(w.id) + '">重载</button>' +
+          '<button data-act="reload" data-id="' + esc(w.id) + '">重新加载</button>' +
           '<button data-act="uninstall" class="danger" data-id="' + esc(w.id) + '">卸载</button>' +
         '</div>' +
         '<div class="config">' +
           '<label>不透明度<input type="range" min="0.1" max="1" step="0.05" value="' + (state.opacity == null ? 1 : state.opacity) + '" data-state="opacity" data-id="' + esc(w.id) + '"></label>' +
           '<label><input type="checkbox" data-state="clickThrough" data-id="' + esc(w.id) + '" ' + (state.clickThrough ? 'checked' : '') + '> 点击穿透</label>' +
-          '<label><input type="checkbox" data-state="alwaysOnTop" data-id="' + esc(w.id) + '" ' + (state.alwaysOnTop ? 'checked' : '') + '> 置顶</label>' +
+          '<label><input type="checkbox" data-state="alwaysOnTop" data-id="' + esc(w.id) + '" ' + (state.alwaysOnTop ? 'checked' : '') + '> 保持置顶</label>' +
           '<label><input type="checkbox" data-state="locked" data-id="' + esc(w.id) + '" ' + (state.locked ? 'checked' : '') + '> 锁定位置</label>' +
           cfgs +
         '</div></div>';
@@ -176,7 +220,29 @@
   };
   $('openDir').onclick = () => invoke('openWidgetsDir');
   $('openLogs').onclick = () => invoke('openLogsDir');
+
+  // Two-step confirmation instead of window.confirm(): this renderer is sandboxed, so a
+  // native dialog is not something to rely on in front of a destructive action.
+  let resetArmed = false;
+  let resetTimer = null;
+  function disarmReset() {
+    resetArmed = false;
+    clearTimeout(resetTimer);
+    const btn = $('reset');
+    btn.classList.remove('armed');
+    btn.textContent = '恢复默认';
+  }
   $('reset').onclick = async () => {
+    const btn = $('reset');
+    if (!resetArmed) {
+      resetArmed = true;
+      btn.classList.add('armed');
+      btn.textContent = '再点一次确认';
+      say('恢复默认会清空所有小部件的设置与开关，并把之前卸载过的随机附送小部件重新装回。5 秒内再点一次确认，否则自动取消。', true);
+      resetTimer = setTimeout(() => { disarmReset(); say('已取消恢复默认'); }, 5000);
+      return;
+    }
+    disarmReset();
     const r = await invoke('reset');
     if (r) { say('已恢复默认设置'); await loadGlobal(); await refresh(); }
   };
@@ -184,8 +250,7 @@
   for (const key of ['allowNetwork', 'launchAtLogin', 'autoHideOnFullscreen']) {
     $(key).onchange = async (e) => {
       await invoke('setGlobal', { [key]: e.target.checked });
-      say('设置已保存：' + key + (e.target.checked ? ' 已开启' : ' 已关闭'));
-
+      say('已保存：' + key + (e.target.checked ? ' 已开启' : ' 已关闭'));
       await loadGlobal();
     };
   }
@@ -196,7 +261,12 @@
     const act = b.dataset.act;
     const id = b.dataset.id;
     const r = await invoke(act, { id });
-    if (r) { say(act + ' → ' + id + ' 完成'); render(r); }
+    if (r) {
+      say(act === 'uninstall'
+        ? id + ' 已卸载。随机附送的小部件不会被自动装回，需要时可在「恢复默认」里找回'
+        : act + ' → ' + id + ' 完成');
+      render(r);
+    }
   });
 
   $('list').addEventListener('change', async (e) => {
@@ -204,7 +274,7 @@
     const id = el.dataset.id;
     if (!id) return;
     if (el.dataset.state) {
-      const value = el.type === 'checkbox' ? el.checked : Number(el.value);
+      const value = el.type === 'checkbox' ? el.checked : (el.type === 'range' ? Number(el.value) : el.value);
       const r = await invoke('setWidgetState', { id, [el.dataset.state]: value });
       if (r) say('窗口属性已更新');
     } else if (el.dataset.cfg) {
@@ -219,7 +289,7 @@
   loadGlobal();
   refresh();
   setInterval(refresh, 4000);
-  setInterval(loadGlobal, 4000);
+  setInterval(loadGlobal, 6000);
 </script>
 </body>
 </html>

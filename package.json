@@ -1,7 +1,7 @@
 {
   "name": "deskframe",
-  "version": "0.1.0",
-  "description": "Desktop beautification framework: host provides loading, layout, config, lifecycle and fault isolation; widgets are written by users.",
+  "version": "1.0.0",
+  "description": "Desktop beautification framework for Windows: the host provides loading, rendering, layout, configuration, lifecycle and fault isolation; widgets decide what your desktop looks like. Ships with 8 ready-to-use widgets.",
   "private": true,
   "main": "host/main.js",
   "scripts": {
@@ -25,6 +25,10 @@
     },
     "files": [
       "host/**/*",
+      "widgets/**/*",
+      "!widgets/_template/**",
+      "!widgets/README.md",
+      "!widgets/*/README.md",
       "package.json"
     ],
     "win": {
@@ -49,4 +53,5 @@
     "beautification",
     "windows",
     "electron"
-  ]}
+  ]
+}
