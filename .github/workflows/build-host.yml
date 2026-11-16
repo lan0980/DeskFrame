@@ -46,6 +46,27 @@ jobs:
       - name: Build portable exe
         run: npx electron-builder --win
 
+      # Deleting a release does not delete the git tag it created, and a tag named
+      # "latest" reads like a second version to anyone browsing the repo. Sweep the
+      # leftovers before the publish decision, so a stale tag cannot make this run
+      # believe the version is already out.
+      - name: Retire leftover tags and releases
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for stale in latest widgets-latest v1.0.0; do
+            id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${stale}" --jq .id 2>/dev/null || true)"
+            if [ -n "${id}" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" \
+                && echo "deleted release: ${stale}"
+            fi
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${stale}" >/dev/null 2>&1; then
+              echo "deleted tag: ${stale}"
+            fi
+          done
+
       - name: Decide whether this build is a new version
         id: rel
         shell: bash
@@ -71,13 +92,14 @@ jobs:
             fi
           fi
 
+      # Nothing to publish, but still fail loudly if package.json and CHANGELOG disagree.
       - name: Preview release notes when not publishing
         if: steps.rel.outputs.publish == 'false'
         shell: bash
         run: |
           version="$(node -p "require('./package.json').version")"
           node scripts/release-notes.js "$version" -o preview-notes.md
-          echo "CHANGELOG matches package.json version ${version}; nothing to publish."
+          echo "CHANGELOG covers version ${version}; no new release needed."
 
       - name: Cut the version tag
         if: steps.rel.outputs.publish == 'true'
@@ -122,20 +144,3 @@ jobs:
           prerelease: false
           draft: false
           make_latest: true
-
-      # The rolling preview releases were an artifact of the pre-versioning setup; once a
-      # real version exists they only clutter the releases page.
-      - name: Retire earlier rolling releases
-        if: steps.rel.outputs.publish == 'true'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          for tag in latest widgets-latest; do
-            id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id 2>/dev/null || true)"
-            if [ -n "$id" ]; then
-              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" \
-                && echo "retired rolling release: ${tag}"
-            fi
-          done
